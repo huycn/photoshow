@@ -21,6 +21,15 @@
     <ClInclude Include="PhotoShow.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="D2D1Util.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FileUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StringUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="SimplePhotoShow.rc">
@@ -37,6 +46,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="PhotoShow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FileUtil.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

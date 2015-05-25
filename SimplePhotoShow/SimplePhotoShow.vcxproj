@@ -78,8 +78,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="FileUtil.h" />
     <ClInclude Include="PhotoShow.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="D2D1Util.h" />
+    <ClInclude Include="StringUtil.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="SimplePhotoShow.rc" />
@@ -88,6 +91,7 @@
     <Image Include="app_icon.ico" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="FileUtil.cpp" />
     <ClCompile Include="Infrastructure.cpp" />
     <ClCompile Include="PhotoShow.cpp" />
   </ItemGroup>

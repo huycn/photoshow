@@ -1,4 +1,9 @@
 #include "PhotoShow.h"
+#include "D2D1Util.h"
+#include "FileUtil.h"
+#include "StringUtil.h"
+
+#include <strsafe.h>
 #include <cstring>
 
 const float DEFAULT_DPI = 96.f;   // Default DPI that maps image resolution directly to screen resoltuion
@@ -20,7 +25,8 @@ PhotoShow::PhotoShow(int screenWidth, int screenHeight)
 	m_d2dFactory(nullptr),
 	m_renderTarget(nullptr),
 	m_d2dBitmap(nullptr),
-	m_convertedSrcBitmap(nullptr)
+	m_bitmapConverter(nullptr),
+	m_currentFileIndex(0)
 {
 	HRESULT hr = S_OK;
 
@@ -50,16 +56,38 @@ PhotoShow::~PhotoShow()
 }
 
 HRESULT
-PhotoShow::LocateNextImage(LPWSTR pszFileName, DWORD cchFileName)
+PhotoShow::LocateNextImage(LPWSTR pszFileName)
 {
-	wcscpy(pszFileName, L"D:/huyc/Desktop/Anja-Nejarri.jpg");
-	return S_OK;
+	LPWSTR dirPath = L"";
+	if (m_fileList.empty())
+	{
+		ListFilesInDirectory(dirPath, m_fileList, [](const std::wstring &name) {
+			return EndsWith(name, std::wstring(L".jpg")) ||
+					EndsWith(name, std::wstring(L".jpeg")) ||
+					EndsWith(name, std::wstring(L".png"));
+		});
+		m_currentFileIndex = 0;
+	}
+	
+	if (m_currentFileIndex >= m_fileList.size())
+		m_currentFileIndex = 0;
+	
+	if (m_currentFileIndex < m_fileList.size())
+	{
+		StringCchCopy(pszFileName, MAX_PATH, dirPath);
+		StringCchCat(pszFileName, MAX_PATH, L"\\");
+		StringCchCat(pszFileName, MAX_PATH, m_fileList[m_currentFileIndex].c_str());
+		++m_currentFileIndex;
+		return S_OK;
+	}
+	return -1;
 }
 
-void PhotoShow::LoadNextImage(HWND hWnd)
+bool
+PhotoShow::LoadNextImage(HWND hWnd)
 {
 	WCHAR szFileName[MAX_PATH];
-	HRESULT hr = LocateNextImage(szFileName, ARRAYSIZE(szFileName));
+	HRESULT hr = LocateNextImage(szFileName);
 
 	// Step 1: Create the open dialog box and locate the image file
 	if (SUCCEEDED(hr))
@@ -88,13 +116,13 @@ void PhotoShow::LoadNextImage(HWND hWnd)
 		//Step 3: Format convert the frame to 32bppPBGRA
 		if (SUCCEEDED(hr))
 		{
-			SafeRelease(m_convertedSrcBitmap);
-			hr = m_wicFactory->CreateFormatConverter(&m_convertedSrcBitmap);
+			SafeRelease(m_bitmapConverter);
+			hr = m_wicFactory->CreateFormatConverter(&m_bitmapConverter);
 		}
 
 		if (SUCCEEDED(hr))
 		{
-			hr = m_convertedSrcBitmap->Initialize(
+			hr = m_bitmapConverter->Initialize(
 				pFrame,                          // Input bitmap to convert
 				GUID_WICPixelFormat32bppPBGRA,   // Destination pixel format
 				WICBitmapDitherTypeNone,         // Specified dither pattern
@@ -114,24 +142,24 @@ void PhotoShow::LoadNextImage(HWND hWnd)
 		{
 			// Need to release the previous D2DBitmap if there is one
 			SafeRelease(m_d2dBitmap);
-			hr = m_renderTarget->CreateBitmapFromWicBitmap(m_convertedSrcBitmap, nullptr, &m_d2dBitmap);
+			hr = m_renderTarget->CreateBitmapFromWicBitmap(m_bitmapConverter, nullptr, &m_d2dBitmap);
 		}
 
 		SafeRelease(pDecoder);
 		SafeRelease(pFrame);
 	}
+	return SUCCEEDED(hr);
 }
 
 void
 PhotoShow::OnPaint(HWND hWnd)
 {
-	HRESULT hr = S_OK;
 	PAINTSTRUCT ps;
 
 	if (BeginPaint(hWnd, &ps))
 	{
 		// Create render target if not yet created
-		hr = CreateDeviceResources(hWnd);
+		HRESULT hr = CreateDeviceResources(hWnd);
 
 		if (SUCCEEDED(hr) && !(m_renderTarget->CheckWindowState() & D2D1_WINDOW_STATE_OCCLUDED))
 		{
@@ -140,24 +168,23 @@ PhotoShow::OnPaint(HWND hWnd)
 			m_renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
 
 			// Clear the background
-			m_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
-
-			auto rtSize = m_renderTarget->GetSize();
-
-			// Create a rectangle with size of current window
-			auto rectangle = D2D1::RectF(0.0f, 0.0f, rtSize.width, rtSize.height);
+			//m_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
 			// D2DBitmap may have been released due to device loss. 
 			// If so, re-create it from the source bitmap
-			if (m_convertedSrcBitmap != nullptr && m_d2dBitmap == nullptr)
+			if (m_bitmapConverter != nullptr && m_d2dBitmap == nullptr)
 			{
-				m_renderTarget->CreateBitmapFromWicBitmap(m_convertedSrcBitmap, nullptr, &m_d2dBitmap);
+				m_renderTarget->CreateBitmapFromWicBitmap(m_bitmapConverter, nullptr, &m_d2dBitmap);
 			}
 
 			// Draws an image and scales it to the current window size
 			if (m_d2dBitmap)
 			{
-				m_renderTarget->DrawBitmap(m_d2dBitmap, rectangle);
+				auto rtSize = m_d2dBitmap->GetSize(); // m_renderTarget->GetSize();
+				auto rect = D2D1::RectF(0.0f, 0.0f, rtSize.width, rtSize.height);
+				//D2D1::OffsetRect(rect, 200.f, 100.f);
+				
+				m_renderTarget->DrawBitmap(m_d2dBitmap, rect);
 			}
 
 			hr = m_renderTarget->EndDraw();
@@ -184,7 +211,6 @@ PhotoShow::OnPaint(HWND hWnd)
 *  need to be recreated in the event of D2D device loss           *
 * (e.g. display change, remoting, removal of video card, etc).    *
 ******************************************************************/
-
 HRESULT
 PhotoShow::CreateDeviceResources(HWND hWnd)
 {
