@@ -5,6 +5,7 @@
 //define a Windows timer 
 #define TIMER_ID 1 
 
+#define LOAD_INTERVAL 10
 
 LRESULT WINAPI
 ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -19,6 +20,8 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			RECT rect;
 			GetClientRect(hWnd, &rect);
 			photoShow = std::make_shared<PhotoShow>(rect.right - rect.left, rect.bottom - rect.top);
+			photoShow->LoadNextImage(hWnd);
+
 			//get configuration from registry
 			//GetConfig();
 			//long style;
@@ -32,7 +35,7 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			//SetWindowLong(hWnd, GWL_STYLE, style);
 
 			//set timer to tick every 30 ms
-			SetTimer(hWnd, TIMER_ID, 3000, NULL);
+			SetTimer(hWnd, TIMER_ID, LOAD_INTERVAL * 1000, NULL);
 			return S_OK;
 		}
 		case WM_DESTROY:

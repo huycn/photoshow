@@ -11,5 +11,4 @@ namespace D2D1 {
 		rect.top += dy;
 		rect.bottom += dy;
 	}
-
 }

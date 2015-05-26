@@ -2,9 +2,11 @@
 #include "D2D1Util.h"
 #include "FileUtil.h"
 #include "StringUtil.h"
+#include "ImageUtil.h"
 
 #include <strsafe.h>
 #include <cstring>
+#include <algorithm>
 
 const float DEFAULT_DPI = 96.f;   // Default DPI that maps image resolution directly to screen resoltuion
 
@@ -66,6 +68,7 @@ PhotoShow::LocateNextImage(LPWSTR pszFileName)
 					EndsWith(name, std::wstring(L".jpeg")) ||
 					EndsWith(name, std::wstring(L".png"));
 		});
+		std::shuffle(m_fileList.begin(), m_fileList.end(), m_randomizer);
 		m_currentFileIndex = 0;
 	}
 	
@@ -168,7 +171,10 @@ PhotoShow::OnPaint(HWND hWnd)
 			m_renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
 
 			// Clear the background
-			//m_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
+			ID2D1SolidColorBrush *brush;
+			m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, 0.5f), &brush);
+			m_renderTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, float(m_screenWidth), float(m_screenHeight)), brush);
+			brush->Release();
 
 			// D2DBitmap may have been released due to device loss. 
 			// If so, re-create it from the source bitmap
@@ -180,9 +186,18 @@ PhotoShow::OnPaint(HWND hWnd)
 			// Draws an image and scales it to the current window size
 			if (m_d2dBitmap)
 			{
-				auto rtSize = m_d2dBitmap->GetSize(); // m_renderTarget->GetSize();
-				auto rect = D2D1::RectF(0.0f, 0.0f, rtSize.width, rtSize.height);
-				//D2D1::OffsetRect(rect, 200.f, 100.f);
+				auto rtSize = m_d2dBitmap->GetSize();
+				int imgWidth = RoundToNearest(rtSize.width);
+				int imgHeight = RoundToNearest(rtSize.height);
+				if (imgWidth > m_screenWidth || imgHeight > m_screenHeight)
+				{
+					std::tie(imgWidth, imgHeight) = ScaleToFit(imgWidth, imgHeight, m_screenWidth, m_screenHeight); // m_renderTarget->GetSize();
+				}
+
+				auto rect = D2D1::RectF(0.0f, 0.0f, float(imgWidth), float(imgHeight));
+				int dx = imgWidth < m_screenWidth ? std::uniform_int_distribution<int>(0, m_screenWidth - imgWidth)(m_randomizer) : 0;
+				int dy = imgHeight < m_screenHeight ? std::uniform_int_distribution<int>(0, m_screenHeight - imgHeight)(m_randomizer) : 0;
+				D2D1::OffsetRect(rect, dx, dy);
 				
 				m_renderTarget->DrawBitmap(m_d2dBitmap, rect);
 			}
@@ -218,7 +233,7 @@ PhotoShow::CreateDeviceResources(HWND hWnd)
 
 	if (m_renderTarget == nullptr)
 	{
-		auto renderTargetProperties = D2D1::RenderTargetProperties();
+		auto renderTargetProperties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED));
 
 		// Set the DPI to be the default system DPI to allow direct mapping
 		// between image pixels and desktop pixels in different system DPI settings

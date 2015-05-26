@@ -4,6 +4,7 @@
 #include <d2d1.h>
 #include <vector>
 #include <string>
+#include <random>
 
 class PhotoShow
 {
@@ -30,4 +31,6 @@ private:
 
 	std::vector<std::wstring> m_fileList;
 	size_t m_currentFileIndex;
+	std::random_device m_randomizer;
+
 };
