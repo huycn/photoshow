@@ -1,16 +1,21 @@
 #include "PhotoShow.h"
 #include <scrnsave.h>
 #include <memory>
+#include <chrono>
 
 //define a Windows timer 
-#define TIMER_ID 1 
+#define NEXT_IMAGE_TIMER_ID 1 
+#define NEXT_ANIM_FRAME_TIMER_ID 2
 
 #define LOAD_INTERVAL 10
+#define ANIMATION_LENGTH 1000
+#define ANIMATION_PRECISION 33	// frame per second
 
 LRESULT WINAPI
 ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static std::shared_ptr<PhotoShow> photoShow;
+	static std::chrono::steady_clock::time_point animStart;
 
 	switch (message)
 	{
@@ -22,26 +27,20 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			photoShow = std::make_shared<PhotoShow>(rect.right - rect.left, rect.bottom - rect.top);
 			photoShow->LoadNextImage(hWnd);
 
-			//get configuration from registry
-			//GetConfig();
-			//long style;
-			//style = GetWindowLong(hWnd, GWL_EXSTYLE);
-			//style &= ~WS_EX_TOPMOST;
-			//SetWindowLong(hWnd, GWL_EXSTYLE, style);
-
-			//style = GetWindowLong(hWnd, GWL_STYLE);
-			//style &= ~WS_POPUP;
-			//style |= WS_OVERLAPPEDWINDOW;
-			//SetWindowLong(hWnd, GWL_STYLE, style);
-
 			//set timer to tick every 30 ms
-			SetTimer(hWnd, TIMER_ID, LOAD_INTERVAL * 1000, NULL);
+#ifdef _DEBUG
+			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, 100, NULL);
+#else
+			SetTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID, 1000 / ANIMATION_PRECISION, NULL);
+			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, LOAD_INTERVAL * 1000, NULL);
+#endif
 			return S_OK;
 		}
 		case WM_DESTROY:
 		{
 			photoShow.reset();
-			KillTimer(hWnd, TIMER_ID);
+			KillTimer(hWnd, NEXT_IMAGE_TIMER_ID);
+			KillTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID);
 			break;
 		}
 		case WM_PAINT:
@@ -49,18 +48,35 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return S_OK;
 		case WM_TIMER:
 		{
-#ifdef _DEBUG
-			static bool sentToBack = false;
-			if (!sentToBack) {
-				SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-				sentToBack = true;
-			}
-#endif
-			if (photoShow->LoadNextImage(hWnd))
+			if (wParam == NEXT_IMAGE_TIMER_ID)
 			{
-				RECT r;
-				GetClientRect(hWnd, &r);
-				InvalidateRect(hWnd, &r, false);
+#ifdef _DEBUG
+				static bool sentToBack = false;
+				if (!sentToBack) {
+					SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+					SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, LOAD_INTERVAL * 1000, NULL);
+					SetTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID, 1000 / ANIMATION_PRECISION, NULL);
+					sentToBack = true;
+				} else
+#endif
+				if (photoShow->LoadNextImage(hWnd))
+				{
+					animStart = std::chrono::steady_clock::now();
+					SetTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID, 1000 / ANIMATION_PRECISION, NULL);
+				}
+			}
+			else if (wParam == NEXT_ANIM_FRAME_TIMER_ID)
+			{
+				auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - animStart).count();
+				if (duration >= ANIMATION_LENGTH)
+				{
+					KillTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID);
+					photoShow->EndAnimation(hWnd);
+				}
+				else
+				{
+					photoShow->NextAnimationFrame(hWnd, duration / float(ANIMATION_LENGTH));
+				}
 			}
 			return S_OK;
 		}

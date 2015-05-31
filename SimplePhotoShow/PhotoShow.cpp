@@ -8,7 +8,8 @@
 #include <cstring>
 #include <algorithm>
 
-const float DEFAULT_DPI = 96.f;   // Default DPI that maps image resolution directly to screen resoltuion
+const float DEFAULT_DPI = 96.f;   // Default DPI that maps image resolution directly to screen resolution
+const float BACKGROUND_DARKEN = 0.6f;
 
 template <typename T>
 inline void SafeRelease(T *&p)
@@ -26,6 +27,7 @@ PhotoShow::PhotoShow(int screenWidth, int screenHeight)
 	m_wicFactory(nullptr),
 	m_d2dFactory(nullptr),
 	m_renderTarget(nullptr),
+	m_backgroundTarget(nullptr),
 	m_d2dBitmap(nullptr),
 	m_bitmapConverter(nullptr),
 	m_currentFileIndex(0)
@@ -141,6 +143,21 @@ PhotoShow::LoadNextImage(HWND hWnd)
 			hr = CreateDeviceResources(hWnd);
 		}
 
+		if (SUCCEEDED(hr) && m_d2dBitmap != nullptr)
+		{
+			// render current bitmap to background before load the next
+			m_backgroundTarget->BeginDraw();
+			m_backgroundTarget->SetTransform(D2D1::Matrix3x2F::Identity());
+
+			ID2D1SolidColorBrush *brush;
+			m_backgroundTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, BACKGROUND_DARKEN), &brush);
+			m_backgroundTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, float(m_screenWidth), float(m_screenHeight)), brush);
+			brush->Release();
+
+			m_backgroundTarget->DrawBitmap(m_d2dBitmap, m_bitmapRect);
+			m_backgroundTarget->EndDraw();
+		}
+
 		if (SUCCEEDED(hr))
 		{
 			// Need to release the previous D2DBitmap if there is one
@@ -148,11 +165,46 @@ PhotoShow::LoadNextImage(HWND hWnd)
 			hr = m_renderTarget->CreateBitmapFromWicBitmap(m_bitmapConverter, nullptr, &m_d2dBitmap);
 		}
 
+		if (SUCCEEDED(hr))
+		{
+			auto rtSize = m_d2dBitmap->GetSize();
+			int imgWidth = RoundToNearest(rtSize.width);
+			int imgHeight = RoundToNearest(rtSize.height);
+			if (imgWidth > m_screenWidth || imgHeight > m_screenHeight)
+			{
+				std::tie(imgWidth, imgHeight) = ScaleToFit(imgWidth, imgHeight, m_screenWidth, m_screenHeight); // m_renderTarget->GetSize();
+			}
+
+			m_bitmapRect = D2D1::RectF(0.0f, 0.0f, float(imgWidth), float(imgHeight));
+			int dx = imgWidth < m_screenWidth ? std::uniform_int_distribution<int>(0, m_screenWidth - imgWidth)(m_randomizer) : 0;
+			int dy = imgHeight < m_screenHeight ? std::uniform_int_distribution<int>(0, m_screenHeight - imgHeight)(m_randomizer) : 0;
+			D2D1::OffsetRect(m_bitmapRect, dx, dy);
+
+			m_animProgress = 0.0f;
+
+			InvalidateRect(hWnd, nullptr, false);
+		}
+
 		SafeRelease(pDecoder);
 		SafeRelease(pFrame);
 	}
 	return SUCCEEDED(hr);
 }
+
+void
+PhotoShow::NextAnimationFrame(HWND hWnd, float progress)
+{
+	m_animProgress = progress;
+	InvalidateRect(hWnd, nullptr, false);
+}
+
+void
+PhotoShow::EndAnimation(HWND hWnd)
+{
+	m_animProgress = 1.0f;
+	InvalidateRect(hWnd, nullptr, false);
+}
+
 
 void
 PhotoShow::OnPaint(HWND hWnd)
@@ -167,12 +219,17 @@ PhotoShow::OnPaint(HWND hWnd)
 		if (SUCCEEDED(hr) && !(m_renderTarget->CheckWindowState() & D2D1_WINDOW_STATE_OCCLUDED))
 		{
 			m_renderTarget->BeginDraw();
-
 			m_renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
 
-			// Clear the background
+			ID2D1Bitmap *background = nullptr;
+			if (SUCCEEDED(m_backgroundTarget->GetBitmap(&background)))
+			{
+				m_renderTarget->DrawBitmap(background, D2D1::RectF(0.0f, 0.0f, float(m_screenWidth), float(m_screenHeight)));
+			}
+
 			ID2D1SolidColorBrush *brush;
-			m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, 0.5f), &brush);
+			m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, BACKGROUND_DARKEN), &brush);
+			brush->SetOpacity(m_animProgress);
 			m_renderTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, float(m_screenWidth), float(m_screenHeight)), brush);
 			brush->Release();
 
@@ -184,22 +241,9 @@ PhotoShow::OnPaint(HWND hWnd)
 			}
 
 			// Draws an image and scales it to the current window size
-			if (m_d2dBitmap)
+			if (m_d2dBitmap != nullptr)
 			{
-				auto rtSize = m_d2dBitmap->GetSize();
-				int imgWidth = RoundToNearest(rtSize.width);
-				int imgHeight = RoundToNearest(rtSize.height);
-				if (imgWidth > m_screenWidth || imgHeight > m_screenHeight)
-				{
-					std::tie(imgWidth, imgHeight) = ScaleToFit(imgWidth, imgHeight, m_screenWidth, m_screenHeight); // m_renderTarget->GetSize();
-				}
-
-				auto rect = D2D1::RectF(0.0f, 0.0f, float(imgWidth), float(imgHeight));
-				int dx = imgWidth < m_screenWidth ? std::uniform_int_distribution<int>(0, m_screenWidth - imgWidth)(m_randomizer) : 0;
-				int dy = imgHeight < m_screenHeight ? std::uniform_int_distribution<int>(0, m_screenHeight - imgHeight)(m_randomizer) : 0;
-				D2D1::OffsetRect(rect, dx, dy);
-				
-				m_renderTarget->DrawBitmap(m_d2dBitmap, rect);
+				m_renderTarget->DrawBitmap(m_d2dBitmap, m_bitmapRect, m_animProgress);
 			}
 
 			hr = m_renderTarget->EndDraw();
@@ -209,6 +253,7 @@ PhotoShow::OnPaint(HWND hWnd)
 			if (hr == D2DERR_RECREATE_TARGET)
 			{
 				SafeRelease(m_d2dBitmap);
+				SafeRelease(m_backgroundTarget);
 				SafeRelease(m_renderTarget);
 				
 				// Force a re-render
@@ -233,7 +278,7 @@ PhotoShow::CreateDeviceResources(HWND hWnd)
 
 	if (m_renderTarget == nullptr)
 	{
-		auto renderTargetProperties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED));
+		auto renderTargetProperties = D2D1::RenderTargetProperties();
 
 		// Set the DPI to be the default system DPI to allow direct mapping
 		// between image pixels and desktop pixels in different system DPI settings
@@ -247,6 +292,11 @@ PhotoShow::CreateDeviceResources(HWND hWnd)
 			D2D1::HwndRenderTargetProperties(hWnd, size),
 			&m_renderTarget
 			);
+
+		if (m_renderTarget != nullptr)
+		{
+			m_renderTarget->CreateCompatibleRenderTarget(&m_backgroundTarget);
+		}
 	}
 
 	return hr;
