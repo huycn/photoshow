@@ -21,7 +21,7 @@ inline void SafeRelease(T *&p)
 	}
 }
 
-PhotoShow::PhotoShow(int screenWidth, int screenHeight)
+PhotoShow::PhotoShow(int screenWidth, int screenHeight, const std::vector<std::wstring> &folders, bool shuffle)
 	: m_screenWidth(screenWidth),
 	m_screenHeight(screenHeight),
 	m_wicFactory(nullptr),
@@ -52,6 +52,24 @@ PhotoShow::PhotoShow(int screenWidth, int screenHeight)
 		// Create D2D factory
 		hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &m_d2dFactory);
 	}
+
+	for (const std::wstring &dirPath : folders)
+	{
+		std::vector<std::wstring> fileNameList;
+		ListFilesInDirectory(dirPath, fileNameList, [](const std::wstring &name) {
+			return EndsWith(name, std::wstring(L".jpg")) ||
+				EndsWith(name, std::wstring(L".jpeg")) ||
+				EndsWith(name, std::wstring(L".png"));
+		});
+		for (const std::wstring &fileName : fileNameList)
+		{
+			m_fileList.push_back(dirPath + L"\\" + fileName);
+		}
+	}
+	if (shuffle)
+	{
+		std::shuffle(m_fileList.begin(), m_fileList.end(), m_randomizer);
+	}
 }
 
 PhotoShow::~PhotoShow()
@@ -62,26 +80,12 @@ PhotoShow::~PhotoShow()
 HRESULT
 PhotoShow::LocateNextImage(LPWSTR pszFileName)
 {
-	LPWSTR dirPath = L"";
-	if (m_fileList.empty())
-	{
-		ListFilesInDirectory(dirPath, m_fileList, [](const std::wstring &name) {
-			return EndsWith(name, std::wstring(L".jpg")) ||
-					EndsWith(name, std::wstring(L".jpeg")) ||
-					EndsWith(name, std::wstring(L".png"));
-		});
-		std::shuffle(m_fileList.begin(), m_fileList.end(), m_randomizer);
-		m_currentFileIndex = 0;
-	}
-	
 	if (m_currentFileIndex >= m_fileList.size())
 		m_currentFileIndex = 0;
 	
 	if (m_currentFileIndex < m_fileList.size())
 	{
-		StringCchCopy(pszFileName, MAX_PATH, dirPath);
-		StringCchCat(pszFileName, MAX_PATH, L"\\");
-		StringCchCat(pszFileName, MAX_PATH, m_fileList[m_currentFileIndex].c_str());
+		StringCchCopy(pszFileName, MAX_PATH, m_fileList[m_currentFileIndex].c_str());
 		++m_currentFileIndex;
 		return S_OK;
 	}

@@ -9,7 +9,7 @@
 class PhotoShow
 {
 public:
-	PhotoShow(int screenWidth, int screenHeight);
+	PhotoShow(int screenWidth, int screenHeight, const std::vector<std::wstring> &folders, bool shuffle);
 	~PhotoShow();
 
 	void OnPaint(HWND hWnd);
