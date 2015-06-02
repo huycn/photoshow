@@ -21,6 +21,10 @@ private:
 	int m_screenWidth;
 	int m_screenHeight;
 	float m_animProgress;
+	std::vector<int> m_weightPosX;
+	std::vector<int> m_weightValueX;
+	std::vector<int> m_weightPosY;
+	std::vector<int> m_weightValueY;
 
 	IWICImagingFactory		*m_wicFactory;
 	ID2D1Factory			*m_d2dFactory;

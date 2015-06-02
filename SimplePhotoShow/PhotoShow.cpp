@@ -21,6 +21,69 @@ inline void SafeRelease(T *&p)
 	}
 }
 
+namespace {
+	int peekaboo(std::random_device &randomizer, const std::vector<int> &pos, std::vector<int> &weight, int currentLength)
+	{
+		int window = pos.back();
+
+		if (currentLength >= window)
+			return 0;
+
+		int halfSize = currentLength / 2;
+
+		int startIndex = 0;
+		for (; startIndex < int(pos.size()); ++startIndex)
+		{
+			if (pos[startIndex] >= halfSize)
+			{
+				--startIndex;
+				break;
+			}
+		}
+
+		int endIndex = pos.size() - 1;
+		for (; endIndex >= 0; --endIndex)
+		{
+			if (window - pos[endIndex] >= halfSize)
+			{
+				endIndex += 2;
+				break;
+			}
+		}
+
+		if (endIndex >= 0 && startIndex < endIndex)
+		{
+			int center = RoundToNearest(std::piecewise_linear_distribution<>(pos.begin() + startIndex, pos.begin() + endIndex, weight.begin() + startIndex)(randomizer));
+			int left = std::max(0, std::min(center - halfSize, window - currentLength));
+			int right = left + currentLength;
+			for (size_t i = 0; i < pos.size(); ++i)
+			{
+				if (pos[i] >= left && pos[i] <= right)
+					weight[i] = 1;
+				else
+					weight[i] += 2;
+			}
+			return left;
+		}
+		return std::uniform_int_distribution<int>(0, window - currentLength)(randomizer);
+	}
+
+	void initWeightRange(std::vector<int> &weightPos, std::vector<int> &weightValue, unsigned rangeCount, int length)
+	{
+		weightPos.reserve(rangeCount+1);
+		float rangeWidth = float(length) / rangeCount;
+		int pos = 0;
+		while (weightPos.size() < rangeCount)
+		{
+			weightPos.push_back(pos);
+			pos = RoundToNearest(pos + rangeWidth);
+		}
+		weightPos.push_back(length);
+		weightValue.resize(weightPos.size());
+		std::fill(weightValue.begin(), weightValue.end(), 1);
+	}
+
+}
 PhotoShow::PhotoShow(int screenWidth, int screenHeight, const std::vector<std::wstring> &folders, bool shuffle)
 	: m_screenWidth(screenWidth),
 	m_screenHeight(screenHeight),
@@ -70,6 +133,10 @@ PhotoShow::PhotoShow(int screenWidth, int screenHeight, const std::vector<std::w
 	{
 		std::shuffle(m_fileList.begin(), m_fileList.end(), m_randomizer);
 	}
+
+	int numberOfRange = 20;
+	initWeightRange(m_weightPosX, m_weightValueX, numberOfRange, screenWidth);
+	initWeightRange(m_weightPosY, m_weightValueY, numberOfRange, screenHeight);
 }
 
 PhotoShow::~PhotoShow()
@@ -179,10 +246,9 @@ PhotoShow::LoadNextImage(HWND hWnd)
 				std::tie(imgWidth, imgHeight) = ScaleToFit(imgWidth, imgHeight, m_screenWidth, m_screenHeight); // m_renderTarget->GetSize();
 			}
 
-			m_bitmapRect = D2D1::RectF(0.0f, 0.0f, float(imgWidth), float(imgHeight));
-			int dx = imgWidth < m_screenWidth ? std::uniform_int_distribution<int>(0, m_screenWidth - imgWidth)(m_randomizer) : 0;
-			int dy = imgHeight < m_screenHeight ? std::uniform_int_distribution<int>(0, m_screenHeight - imgHeight)(m_randomizer) : 0;
-			D2D1::OffsetRect(m_bitmapRect, dx, dy);
+			int newX = peekaboo(m_randomizer, m_weightPosX, m_weightValueX, imgWidth);
+			int newY = peekaboo(m_randomizer, m_weightPosY, m_weightValueY, imgHeight);
+			m_bitmapRect = D2D1::RectF(float(newX), float(newY), float(newX + imgWidth), float(newY + imgHeight));
 
 			m_animProgress = 0.0f;
 
