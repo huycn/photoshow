@@ -3,18 +3,17 @@
 #include <commctrl.h>
 #include <shlobj.h>
 #include <memory>
-#include <chrono>
 #include <regex>
 #include <algorithm>
+#include <random>
+#include <map>
 
 #include "resource.h"
+#include "FileUtil.h"
+#include "StringUtil.h"
 
 //define a Windows timer 
 #define NEXT_IMAGE_TIMER_ID 1 
-#define NEXT_ANIM_FRAME_TIMER_ID 2
-
-#define ANIMATION_LENGTH 1000
-#define ANIMATION_PRECISION 33	// frame per second
 
 namespace
 {
@@ -108,13 +107,71 @@ namespace
 		text.resize(len);
 		return text;
 	}
+
+	std::vector<std::wstring> buildFileList(const std::wstring &foldersStr, bool shuffle)
+	{
+		std::vector<std::wstring> folders;
+		if (!foldersStr.empty())
+		{
+			std::copy(std::wsregex_token_iterator(foldersStr.begin(), foldersStr.end(), std::wregex(L"\\r\\n"), -1),
+				std::wsregex_token_iterator(),
+				std::back_inserter(folders));
+		}
+
+		std::vector<std::wstring> result;
+		for (const std::wstring &dirPath : folders)
+		{
+			std::vector<std::wstring> fileNameList;
+			ListFilesInDirectory(dirPath, fileNameList, [](const std::wstring &name) {
+				return EndsWith(name, std::wstring(L".jpg")) ||
+					EndsWith(name, std::wstring(L".jpeg")) ||
+					EndsWith(name, std::wstring(L".png"));
+			});
+			for (const std::wstring &fileName : fileNameList)
+			{
+				result.push_back(dirPath + L"\\" + fileName);
+			}
+		}
+		if (shuffle)
+		{
+			std::shuffle(result.begin(), result.end(), std::random_device());
+		}
+		return result;
+	}
+
+	std::vector<std::wstring> s_imageFileList;
+	std::map<HMONITOR, std::shared_ptr<PhotoShow>> s_photoShows;
+
+	BOOL CALLBACK LoadNextImages(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+	{
+		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
+		if (photoShow == nullptr)
+		{
+			photoShow.reset(new PhotoShow(D2D1::RectF((FLOAT)lprcMonitor->left, (FLOAT)lprcMonitor->top, (FLOAT)lprcMonitor->right, (FLOAT)lprcMonitor->bottom), s_imageFileList), RefCntDeleter());
+		}
+		photoShow->LoadNextImage((HWND)dwData);
+		return TRUE;
+	}
+
+	BOOL CALLBACK CallOnPaint(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+	{
+		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
+		if (photoShow != nullptr)
+		{
+			//RECT r;
+			//photoShow->GetRect(&r);
+			//if (IntersectRect(&r, &r, lprcMonitor) == TRUE)
+			{
+				photoShow->OnPaint((HWND)dwData);
+			}
+		}
+		return TRUE;
+	}
 }
 
 LRESULT WINAPI
 ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	static std::shared_ptr<PhotoShow> photoShow;
-	static std::chrono::steady_clock::time_point animStart;
 	static int loadInterval = 10;
 
 	switch (message)
@@ -129,36 +186,33 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			bool shuffle;
 			GetConfig(folders, loadInterval, shuffle);
 
-			std::vector<std::wstring> folderList;
-			if (!folders.empty())
-			{
-				std::copy(std::wsregex_token_iterator(folders.begin(), folders.end(), std::wregex(L"\\r\\n"), -1),
-					std::wsregex_token_iterator(),
-					std::back_inserter(folderList));
-			}
+			s_imageFileList = buildFileList(folders, shuffle);
 
-			photoShow = std::make_shared<PhotoShow>(rect.right - rect.left, rect.bottom - rect.top, folderList, shuffle);
-			photoShow->LoadNextImage(hWnd);
+			EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)hWnd);
 
-			//set timer to tick every 30 ms
 #ifdef _DEBUG
 			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, 100, NULL);
 #else
-			SetTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID, 1000 / ANIMATION_PRECISION, NULL);
 			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
 #endif
 			return S_OK;
 		}
 		case WM_DESTROY:
 		{
-			photoShow.reset();
+			s_photoShows.clear();
 			KillTimer(hWnd, NEXT_IMAGE_TIMER_ID);
-			KillTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID);
 			break;
 		}
 		case WM_PAINT:
-			photoShow->OnPaint(hWnd);
+		{
+			PAINTSTRUCT ps;
+			if (BeginPaint(hWnd, &ps))
+			{
+				EnumDisplayMonitors(ps.hdc, &ps.rcPaint, &CallOnPaint, (LPARAM)hWnd);
+				EndPaint(hWnd, &ps);
+			}
 			return S_OK;
+		}
 		case WM_TIMER:
 		{
 			if (wParam == NEXT_IMAGE_TIMER_ID)
@@ -168,28 +222,11 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				if (!sentToBack) {
 					SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 					SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
-					SetTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID, 1000 / ANIMATION_PRECISION, NULL);
 					sentToBack = true;
-				} else
-#endif
-				if (photoShow->LoadNextImage(hWnd))
-				{
-					animStart = std::chrono::steady_clock::now();
-					SetTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID, 1000 / ANIMATION_PRECISION, NULL);
-				}
-			}
-			else if (wParam == NEXT_ANIM_FRAME_TIMER_ID)
-			{
-				auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - animStart).count();
-				if (duration >= ANIMATION_LENGTH)
-				{
-					KillTimer(hWnd, NEXT_ANIM_FRAME_TIMER_ID);
-					photoShow->EndAnimation(hWnd);
 				}
 				else
-				{
-					photoShow->NextAnimationFrame(hWnd, duration / float(ANIMATION_LENGTH));
-				}
+#endif
+				EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)hWnd);
 			}
 			return S_OK;
 		}

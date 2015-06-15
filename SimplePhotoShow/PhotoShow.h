@@ -5,41 +5,52 @@
 #include <vector>
 #include <string>
 #include <random>
+#include <chrono>
 
-class PhotoShow
+#include "RefCnt.h"
+
+class PhotoShow : public RefCnt<PhotoShow>
 {
 public:
-	PhotoShow(int screenWidth, int screenHeight, const std::vector<std::wstring> &folders, bool shuffle);
+	PhotoShow(const D2D1_RECT_F &screenRect, const std::vector<std::wstring> &imageList);
 	~PhotoShow();
 
 	void OnPaint(HWND hWnd);
 	bool LoadNextImage(HWND hWnd);
-	void NextAnimationFrame(HWND hWnd, float progress);
-	void EndAnimation(HWND hWnd);
+	void GetRect(LPRECT outRect);
+	//void NextAnimationFrame(HWND hWnd, float progress);
+	//void EndAnimation(HWND hWnd);
 
 private:
-	int m_screenWidth;
-	int m_screenHeight;
-	float m_animProgress;
-	std::vector<int> m_weightPosX;
-	std::vector<int> m_weightValueX;
-	std::vector<int> m_weightPosY;
-	std::vector<int> m_weightValueY;
+	D2D1_RECT_F m_screenRect;
 
-	IWICImagingFactory		*m_wicFactory;
-	ID2D1Factory			*m_d2dFactory;
+	FLOAT m_animProgress;
+	std::vector<FLOAT> m_weightPosX;
+	std::vector<FLOAT> m_weightValueX;
+	std::vector<FLOAT> m_weightPosY;
+	std::vector<FLOAT> m_weightValueY;
+
 	ID2D1HwndRenderTarget	*m_renderTarget;
 	ID2D1BitmapRenderTarget *m_backgroundTarget;
 
 	ID2D1Bitmap				*m_d2dBitmap;
 	IWICFormatConverter		*m_bitmapConverter;
 
-	D2D1_RECT_F             m_bitmapRect;
+	D2D1_RECT_F             m_bitmapRect;	// relative to m_screenRect
 
 	std::vector<std::wstring> m_fileList;
 	size_t m_currentFileIndex;
 	std::random_device m_randomizer;
 
+	std::chrono::steady_clock::time_point m_animStart;
+
+	static int                s_instanceCount;
+	static IWICImagingFactory *s_wicFactory;
+	static ID2D1Factory		  *s_d2dFactory;
+
 	HRESULT LocateNextImage(LPWSTR pszFileName);
 	HRESULT CreateDeviceResources(HWND hWnd);
+	void Invalidate(HWND hWnd);
+
+	static void CALLBACK NextAnimationFrame(HWND hwnd, UINT uMsg, UINT_PTR idEvent, DWORD dwTime);
 };
