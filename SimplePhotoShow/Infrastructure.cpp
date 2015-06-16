@@ -139,17 +139,37 @@ namespace
 		return result;
 	}
 
+	bool s_shuffleImages;
 	std::vector<std::wstring> s_imageFileList;
 	std::map<HMONITOR, std::shared_ptr<PhotoShow>> s_photoShows;
 
+	struct LoadImageParam
+	{
+		HWND hWnd;
+		int waitIndex;
+	};
+
 	BOOL CALLBACK LoadNextImages(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
 	{
-		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
-		if (photoShow == nullptr)
+		LoadImageParam* param = (LoadImageParam*)dwData;
+		HWND hWnd = param->hWnd;
+		if (param->waitIndex <= 0)
 		{
-			photoShow.reset(new PhotoShow(D2D1::RectF((FLOAT)lprcMonitor->left, (FLOAT)lprcMonitor->top, (FLOAT)lprcMonitor->right, (FLOAT)lprcMonitor->bottom), s_imageFileList), RefCntDeleter());
+			std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
+			if (photoShow == nullptr)
+			{
+				RECT rect;
+				GetClientRect(hWnd, &rect);
+				if (s_shuffleImages)
+				{
+					std::shuffle(s_imageFileList.begin(), s_imageFileList.end(), std::random_device());
+				}
+				photoShow.reset(new PhotoShow(rect.right, rect.bottom, D2D1::RectF((FLOAT)lprcMonitor->left, (FLOAT)lprcMonitor->top, (FLOAT)lprcMonitor->right, (FLOAT)lprcMonitor->bottom), s_imageFileList), RefCntDeleter());
+			}
+			photoShow->LoadNextImage(hWnd);
+			return param->waitIndex < 0 ? TRUE : FALSE;
 		}
-		photoShow->LoadNextImage((HWND)dwData);
+		param->waitIndex -= 1;
 		return TRUE;
 	}
 
@@ -158,9 +178,9 @@ namespace
 		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
 		if (photoShow != nullptr)
 		{
-			//RECT r;
-			//photoShow->GetRect(&r);
-			//if (IntersectRect(&r, &r, lprcMonitor) == TRUE)
+			RECT r;
+			photoShow->GetRect(&r);
+			if (IntersectRect(&r, &r, lprcMonitor) == TRUE)
 			{
 				photoShow->OnPaint((HWND)dwData);
 			}
@@ -173,22 +193,21 @@ LRESULT WINAPI
 ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	static int loadInterval = 10;
+	static int currentIndex = 0;
 
 	switch (message)
 	{
 		case WM_CREATE:
 		{
-			// get window dimensions
-			RECT rect;
-			GetClientRect(hWnd, &rect);
-
 			std::wstring folders;
-			bool shuffle;
-			GetConfig(folders, loadInterval, shuffle);
+			GetConfig(folders, loadInterval, s_shuffleImages);
 
-			s_imageFileList = buildFileList(folders, shuffle);
+			s_imageFileList = buildFileList(folders, false);
 
-			EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)hWnd);
+			LoadImageParam param;
+			param.hWnd = hWnd;
+			param.waitIndex = -1;
+			EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
 
 #ifdef _DEBUG
 			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, 100, NULL);
@@ -226,7 +245,16 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				}
 				else
 #endif
-				EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)hWnd);
+				{
+					if (currentIndex <= 0)
+					{
+						currentIndex = s_photoShows.size();
+					}
+					LoadImageParam param;
+					param.hWnd = hWnd;
+					param.waitIndex = --currentIndex;
+					EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
+				}
 			}
 			return S_OK;
 		}

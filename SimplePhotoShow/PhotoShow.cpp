@@ -87,22 +87,28 @@ namespace {
 }
 
 int PhotoShow::s_instanceCount = 0;
+int PhotoShow::s_virtualWidth = 0;
+int PhotoShow::s_virtualHeight = 0;
 IWICImagingFactory* PhotoShow::s_wicFactory = nullptr;
 ID2D1Factory* PhotoShow::s_d2dFactory = nullptr;
+ID2D1HwndRenderTarget* PhotoShow::s_renderTarget = nullptr;
 
-PhotoShow::PhotoShow(const D2D1_RECT_F &screenRect, const std::vector<std::wstring> &imageList)
+PhotoShow::PhotoShow(int virtualScreenWidth, int virtualScreenHeight, const D2D1_RECT_F &screenRect, const std::vector<std::wstring> &imageList)
 	: m_screenRect(screenRect),
-	m_renderTarget(nullptr),
 	m_backgroundTarget(nullptr),
 	m_d2dBitmap(nullptr),
 	m_bitmapConverter(nullptr),
 	m_fileList(imageList),
-	m_currentFileIndex(0)
+	m_currentFileIndex(0),
+	m_renderTarget(nullptr)
 {
 	HRESULT hr = S_OK;
 
 	if (s_instanceCount++ == 0)
 	{
+		s_virtualWidth = virtualScreenWidth;
+		s_virtualHeight = virtualScreenHeight;
+
 		hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
 		// Create WIC factory
@@ -121,6 +127,8 @@ PhotoShow::PhotoShow(const D2D1_RECT_F &screenRect, const std::vector<std::wstri
 			// Create D2D factory
 			hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &s_d2dFactory);
 		}
+
+
 	}
 
 	int numberOfRange = 20;
@@ -133,10 +141,10 @@ PhotoShow::~PhotoShow()
 	SafeRelease(m_d2dBitmap);
 	SafeRelease(m_bitmapConverter);
 	SafeRelease(m_backgroundTarget);
-	SafeRelease(m_renderTarget);
 
 	if (--s_instanceCount == 0)
 	{
+		SafeRelease(s_renderTarget);
 		CoUninitialize();
 	}
 }
@@ -191,24 +199,31 @@ PhotoShow::LoadNextImage(HWND hWnd)
 		{
 			SafeRelease(m_bitmapConverter);
 			hr = s_wicFactory->CreateFormatConverter(&m_bitmapConverter);
-		}
-
-		if (SUCCEEDED(hr))
-		{
-			hr = m_bitmapConverter->Initialize(
-				pFrame,                          // Input bitmap to convert
-				GUID_WICPixelFormat32bppPBGRA,   // Destination pixel format
-				WICBitmapDitherTypeNone,         // Specified dither pattern
-				nullptr,                         // Specify a particular palette 
-				0.f,                             // Alpha threshold
-				WICBitmapPaletteTypeCustom       // Palette translation type
-				);
+			if (SUCCEEDED(hr))
+			{
+				hr = m_bitmapConverter->Initialize(
+					pFrame,                          // Input bitmap to convert
+					GUID_WICPixelFormat32bppPBGRA,   // Destination pixel format
+					WICBitmapDitherTypeNone,         // Specified dither pattern
+					nullptr,                         // Specify a particular palette 
+					0.f,                             // Alpha threshold
+					WICBitmapPaletteTypeCustom       // Palette translation type
+					);
+			}
 		}
 
 		//Step 4: Create render target and D2D bitmap from IWICBitmapSource
 		if (SUCCEEDED(hr))
 		{
 			hr = CreateDeviceResources(hWnd);
+		}
+
+		auto screenWidth = m_screenRect.right - m_screenRect.left;
+		auto screenHeight = m_screenRect.bottom - m_screenRect.top;
+
+		if (m_backgroundTarget == nullptr)
+		{
+			hr = m_renderTarget->CreateCompatibleRenderTarget(D2D1::SizeF(screenWidth, screenHeight), &m_backgroundTarget);
 		}
 
 		if (SUCCEEDED(hr) && m_d2dBitmap != nullptr)
@@ -219,7 +234,7 @@ PhotoShow::LoadNextImage(HWND hWnd)
 
 			ID2D1SolidColorBrush *brush;
 			m_backgroundTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, BACKGROUND_DARKEN), &brush);
-			m_backgroundTarget->FillRectangle(D2D1::RectF(0.f, 0.f, m_screenRect.right - m_screenRect.left, m_screenRect.bottom - m_screenRect.top), brush);
+			m_backgroundTarget->FillRectangle(D2D1::RectF(0.f, 0.f, screenWidth, screenHeight), brush);
 			brush->Release();
 
 			m_backgroundTarget->DrawBitmap(m_d2dBitmap, m_bitmapRect);
@@ -238,8 +253,6 @@ PhotoShow::LoadNextImage(HWND hWnd)
 			auto rtSize = m_d2dBitmap->GetSize();
 			auto imgWidth = rtSize.width;
 			auto imgHeight = rtSize.height;
-			auto screenWidth = m_screenRect.right - m_screenRect.left;
-			auto screenHeight = m_screenRect.bottom - m_screenRect.top;
 			if (imgWidth > screenWidth || imgHeight > screenHeight)
 			{
 				std::tie(imgWidth, imgHeight) = ScaleToFit(imgWidth, imgHeight, screenWidth, screenHeight); // m_renderTarget->GetSize();
@@ -343,15 +356,22 @@ PhotoShow::OnPaint(HWND hWnd)
 		// They will be re-created in the next rendering pass
 		if (hr == D2DERR_RECREATE_TARGET)
 		{
-			SafeRelease(m_d2dBitmap);
-			SafeRelease(m_backgroundTarget);
-			SafeRelease(m_renderTarget);
-				
+			SafeRelease(s_renderTarget);
+			m_renderTarget = nullptr;
+			OnRenderTargetReset();
+
 			// Force a re-render
 			Invalidate(hWnd);
 			hr = S_OK;
 		}
 	}
+}
+
+void
+PhotoShow::OnRenderTargetReset()
+{
+	SafeRelease(m_d2dBitmap);
+	SafeRelease(m_backgroundTarget);
 }
 
 /******************************************************************
@@ -365,7 +385,7 @@ PhotoShow::CreateDeviceResources(HWND hWnd)
 {
 	HRESULT hr = S_OK;
 
-	if (m_renderTarget == nullptr)
+	if (s_renderTarget == nullptr)
 	{
 		auto renderTargetProperties = D2D1::RenderTargetProperties();
 
@@ -374,18 +394,19 @@ PhotoShow::CreateDeviceResources(HWND hWnd)
 		renderTargetProperties.dpiX = DEFAULT_DPI;
 		renderTargetProperties.dpiY = DEFAULT_DPI;
 
-		auto size = D2D1::SizeU(RoundToNearest(m_screenRect.right - m_screenRect.left), RoundToNearest(m_screenRect.bottom - m_screenRect.top));
+		auto size = D2D1::SizeU(s_virtualWidth, s_virtualHeight);
 
 		hr = s_d2dFactory->CreateHwndRenderTarget(
 			renderTargetProperties,
 			D2D1::HwndRenderTargetProperties(hWnd, size),
-			&m_renderTarget
+			&s_renderTarget
 			);
+	}
 
-		if (m_renderTarget != nullptr)
-		{
-			m_renderTarget->CreateCompatibleRenderTarget(&m_backgroundTarget);
-		}
+	if (m_renderTarget != s_renderTarget)
+	{
+		OnRenderTargetReset();
+		m_renderTarget = s_renderTarget;
 	}
 
 	return hr;
