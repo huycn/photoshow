@@ -15,6 +15,16 @@
 //define a Windows timer 
 #define NEXT_IMAGE_TIMER_ID 1 
 
+//#define WITH_DEBUG_LOG
+
+#ifdef WITH_DEBUG_LOG
+#include <fstream>
+static std::ofstream logFile("R:/photoshow_infrastructure.txt");
+#define DEBUG_LOG(x) logFile << x << std::endl
+#else
+#define DEBUG_LOG(x)
+#endif
+
 namespace
 {
 	bool GetRegistryValue(HKEY key, LPCTSTR name, std::wstring &value)
@@ -142,6 +152,8 @@ namespace
 	bool s_shuffleImages;
 	std::vector<std::wstring> s_imageFileList;
 	std::map<HMONITOR, std::shared_ptr<PhotoShow>> s_photoShows;
+	LONG s_offsetLeft;
+	LONG s_offsetTop;
 
 	struct LoadImageParam
 	{
@@ -149,8 +161,18 @@ namespace
 		int waitIndex;
 	};
 
+	BOOL CALLBACK GetOffsets(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+	{
+		s_offsetLeft = std::min(s_offsetLeft, lprcMonitor->left);
+		s_offsetTop = std::min(s_offsetTop, lprcMonitor->top);
+		return TRUE;
+	}
+
 	BOOL CALLBACK LoadNextImages(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
 	{
+		OffsetRect(lprcMonitor, -s_offsetLeft, -s_offsetTop);
+
+		DEBUG_LOG("LoadNexImages hMonitor: " << (int)hMonitor << " Rect: " << lprcMonitor->left << ' ' << lprcMonitor->top << ' ' << lprcMonitor->right << ' ' << lprcMonitor->bottom);
 		LoadImageParam* param = (LoadImageParam*)dwData;
 		HWND hWnd = param->hWnd;
 		if (param->waitIndex <= 0)
@@ -160,6 +182,7 @@ namespace
 			{
 				RECT rect;
 				GetClientRect(hWnd, &rect);
+				DEBUG_LOG("GetClientRect: " << rect.left << ' ' << rect.top << ' ' << rect.right << ' ' << rect.bottom);
 				if (s_shuffleImages)
 				{
 					std::shuffle(s_imageFileList.begin(), s_imageFileList.end(), std::random_device());
@@ -175,6 +198,7 @@ namespace
 
 	BOOL CALLBACK CallOnPaint(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
 	{
+		DEBUG_LOG("CallOnPaint hMonitor: " << (int)hMonitor << " Rect: " << lprcMonitor->left << ' ' << lprcMonitor->top << ' ' << lprcMonitor->right << ' ' << lprcMonitor->bottom);
 		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
 		if (photoShow != nullptr)
 		{
@@ -204,6 +228,8 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			s_imageFileList = buildFileList(folders, false);
 
+			EnumDisplayMonitors(nullptr, nullptr, &GetOffsets, 0);
+
 			LoadImageParam param;
 			param.hWnd = hWnd;
 			param.waitIndex = -1;
@@ -227,6 +253,7 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			PAINTSTRUCT ps;
 			if (BeginPaint(hWnd, &ps))
 			{
+				DEBUG_LOG("Dirty Rect: " << ps.rcPaint.left << ' ' << ps.rcPaint.top << ' ' << ps.rcPaint.right << ' ' << ps.rcPaint.bottom);
 				EnumDisplayMonitors(ps.hdc, &ps.rcPaint, &CallOnPaint, (LPARAM)hWnd);
 				EndPaint(hWnd, &ps);
 			}

@@ -6,6 +6,16 @@
 #include <cstring>
 #include <algorithm>
 
+//#define WITH_DEBUG_LOG
+
+#ifdef WITH_DEBUG_LOG
+#include <fstream>
+static std::ofstream logFile("R:/photoshow_photoshow.txt");
+#define DEBUG_LOG(x) logFile << x << std::endl
+#else
+#define DEBUG_LOG(x)
+#endif
+
 const float DEFAULT_DPI = 96.f;   // Default DPI that maps image resolution directly to screen resolution
 const float BACKGROUND_DARKEN = 0.6f;
 
@@ -309,6 +319,7 @@ PhotoShow::Invalidate(HWND hWnd)
 {
 	RECT r;
 	GetRect(&r);
+	DEBUG_LOG("Invalidate Rect: " << r.left << ' ' << r.top << ' ' << r.right << ' ' << r.bottom);
 	InvalidateRect(hWnd, &r, false);
 }
 
