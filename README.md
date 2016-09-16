@@ -1,2 +1,2 @@
-# photoshow
-Simple photo slideshow screensaver
+# Simple PhotoShow
+Simple photo slideshow screensaver with multi-monitor support.
