@@ -1,5 +1,6 @@
-Debug
-Release
+Debug/
+Release/
+.vs/
 *.sdf
 *.opensdf
 *.suo

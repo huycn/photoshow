@@ -123,7 +123,8 @@ namespace
 		std::vector<std::wstring> folders;
 		if (!foldersStr.empty())
 		{
-			std::copy(std::wsregex_token_iterator(foldersStr.begin(), foldersStr.end(), std::wregex(L"\\r\\n"), -1),
+			std::wregex re(L"\\r\\n");
+			std::copy(std::wsregex_token_iterator(foldersStr.begin(), foldersStr.end(), re, -1),
 				std::wsregex_token_iterator(),
 				std::back_inserter(folders));
 		}
