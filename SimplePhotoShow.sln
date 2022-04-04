@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 2013
-VisualStudioVersion = 12.0.31101.0
+# Visual Studio Version 17
+VisualStudioVersion = 17.1.32319.34
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SimplePhotoShow", "SimplePhotoShow\SimplePhotoShow.vcxproj", "{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}"
 EndProject
@@ -9,14 +9,23 @@ Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
 		Release|Win32 = Release|Win32
+		StandaloneDebug|Win32 = StandaloneDebug|Win32
+		StandaloneRelease|Win32 = StandaloneRelease|Win32
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.Debug|Win32.ActiveCfg = Debug|Win32
 		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.Debug|Win32.Build.0 = Debug|Win32
 		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.Release|Win32.ActiveCfg = Release|Win32
 		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.Release|Win32.Build.0 = Release|Win32
+		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.StandaloneDebug|Win32.ActiveCfg = StandaloneDebug|Win32
+		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.StandaloneDebug|Win32.Build.0 = StandaloneDebug|Win32
+		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.StandaloneRelease|Win32.ActiveCfg = StandaloneRelease|Win32
+		{BAF5532B-5E9C-42F4-8ABE-1B62A5E1D10F}.StandaloneRelease|Win32.Build.0 = StandaloneRelease|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {55294888-F654-4305-A620-8CD29C47FEDA}
 	EndGlobalSection
 EndGlobal

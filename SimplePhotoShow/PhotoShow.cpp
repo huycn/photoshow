@@ -25,8 +25,7 @@ const float BACKGROUND_DARKEN = 0.6f;
 template <typename T>
 inline void SafeRelease(T *&p)
 {
-	if (nullptr != p)
-	{
+	if (nullptr != p) {
 		p->Release();
 		p = nullptr;
 	}
@@ -37,42 +36,39 @@ namespace {
 	{
 		FLOAT window = pos.back();
 
-		if (currentLength >= window)
+		if (currentLength >= window) {
 			return 0.f;
+		}
 
 		FLOAT halfSize = currentLength / 2;
 
 		int startIndex = 0;
-		for (; startIndex < int(pos.size()); ++startIndex)
-		{
-			if (pos[startIndex] >= halfSize)
-			{
+		for (; startIndex < int(pos.size()); ++startIndex) {
+			if (pos[startIndex] >= halfSize) {
 				--startIndex;
 				break;
 			}
 		}
 
 		int endIndex = pos.size() - 1;
-		for (; endIndex >= 0; --endIndex)
-		{
-			if (window - pos[endIndex] >= halfSize)
-			{
+		for (; endIndex >= 0; --endIndex) {
+			if (window - pos[endIndex] >= halfSize) {
 				endIndex += 2;
 				break;
 			}
 		}
 
-		if (endIndex >= 0 && startIndex < endIndex)
-		{
+		if (endIndex >= 0 && startIndex < endIndex) {
 			FLOAT center = static_cast<FLOAT>(std::piecewise_linear_distribution<>(pos.begin() + startIndex, pos.begin() + endIndex, weight.begin() + startIndex)(randomizer));
 			FLOAT left = std::max(0.0f, std::min(center - halfSize, window - currentLength));
 			FLOAT right = left + currentLength;
-			for (size_t i = 0; i < pos.size(); ++i)
-			{
-				if (pos[i] >= left && pos[i] <= right)
+			for (size_t i = 0; i < pos.size(); ++i) {
+				if (pos[i] >= left && pos[i] <= right) {
 					weight[i] = 1.f;
-				else
+				}
+				else {
 					weight[i] += 2.f;
+				}
 			}
 			return left;
 		}
@@ -84,8 +80,7 @@ namespace {
 		weightPos.reserve(rangeCount+1);
 		FLOAT rangeWidth = length / rangeCount;
 		FLOAT pos = 0;
-		while (weightPos.size() < rangeCount)
-		{
+		while (weightPos.size() < rangeCount) {
 			weightPos.push_back(pos);
 			pos = pos + rangeWidth;
 		}
@@ -105,25 +100,25 @@ ID2D1HwndRenderTarget* PhotoShow::s_renderTarget = nullptr;
 
 PhotoShow::PhotoShow(int virtualScreenWidth, int virtualScreenHeight, const D2D1_RECT_F &screenRect, const std::vector<std::wstring> &imageList)
 	: m_screenRect(screenRect),
+	m_animProgress(0),
 	m_backgroundTarget(nullptr),
 	m_d2dBitmap(nullptr),
 	m_bitmapConverter(nullptr),
+	m_bitmapRect(),
 	m_fileList(imageList),
 	m_currentFileIndex(0),
 	m_renderTarget(nullptr)
 {
 	HRESULT hr = S_OK;
 
-	if (s_instanceCount++ == 0)
-	{
+	if (s_instanceCount++ == 0) {
 		s_virtualWidth = virtualScreenWidth;
 		s_virtualHeight = virtualScreenHeight;
 
 		hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
 		// Create WIC factory
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			hr = CoCreateInstance(
 				CLSID_WICImagingFactory,
 				nullptr,
@@ -132,8 +127,7 @@ PhotoShow::PhotoShow(int virtualScreenWidth, int virtualScreenHeight, const D2D1
 				);
 		}
 
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			// Create D2D factory
 			hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &s_d2dFactory);
 		}
@@ -152,8 +146,7 @@ PhotoShow::~PhotoShow()
 	SafeRelease(m_bitmapConverter);
 	SafeRelease(m_backgroundTarget);
 
-	if (--s_instanceCount == 0)
-	{
+	if (--s_instanceCount == 0) {
 		SafeRelease(s_renderTarget);
 		CoUninitialize();
 	}
@@ -162,11 +155,10 @@ PhotoShow::~PhotoShow()
 HRESULT
 PhotoShow::LocateNextImage(LPWSTR pszFileName)
 {
-	if (m_currentFileIndex >= m_fileList.size())
+	if (m_currentFileIndex >= m_fileList.size()) {
 		m_currentFileIndex = 0;
-	
-	if (m_currentFileIndex < m_fileList.size())
-	{
+	}
+	if (m_currentFileIndex < m_fileList.size()) {
 		StringCchCopy(pszFileName, MAX_PATH, m_fileList[m_currentFileIndex].c_str());
 		++m_currentFileIndex;
 		return S_OK;
@@ -180,14 +172,8 @@ PhotoShow::LoadNextImage(HWND hWnd)
 	WCHAR szFileName[MAX_PATH];
 	HRESULT hr = LocateNextImage(szFileName);
 
-	// Step 1: Create the open dialog box and locate the image file
-	if (SUCCEEDED(hr))
-	{
-		// Step 2: Decode the source image
-
-		// Create a decoder
+	if (SUCCEEDED(hr)) {
 		IWICBitmapDecoder *pDecoder = nullptr;
-
 		hr = s_wicFactory->CreateDecoderFromFilename(
 			szFileName,                      // Image to be decoded
 			nullptr,                         // Do not prefer a particular vendor
@@ -196,21 +182,14 @@ PhotoShow::LoadNextImage(HWND hWnd)
 			&pDecoder                        // Pointer to the decoder
 			);
 
-		// Retrieve the first frame of the image from the decoder
 		IWICBitmapFrameDecode *pFrame = nullptr;
-
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			hr = pDecoder->GetFrame(0, &pFrame);
 		}
-
-		//Step 3: Format convert the frame to 32bppPBGRA
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			SafeRelease(m_bitmapConverter);
 			hr = s_wicFactory->CreateFormatConverter(&m_bitmapConverter);
-			if (SUCCEEDED(hr))
-			{
+			if (SUCCEEDED(hr)) {
 				hr = m_bitmapConverter->Initialize(
 					pFrame,                          // Input bitmap to convert
 					GUID_WICPixelFormat32bppPBGRA,   // Destination pixel format
@@ -221,45 +200,40 @@ PhotoShow::LoadNextImage(HWND hWnd)
 					);
 			}
 		}
-
-		//Step 4: Create render target and D2D bitmap from IWICBitmapSource
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			hr = CreateDeviceResources(hWnd);
 		}
 
 		auto screenWidth = m_screenRect.right - m_screenRect.left;
 		auto screenHeight = m_screenRect.bottom - m_screenRect.top;
 
-		if (m_backgroundTarget == nullptr)
-		{
+		if (m_backgroundTarget == nullptr) {
 			hr = m_renderTarget->CreateCompatibleRenderTarget(D2D1::SizeF(screenWidth, screenHeight), &m_backgroundTarget);
 		}
 
-		if (SUCCEEDED(hr) && m_d2dBitmap != nullptr)
-		{
+		if (SUCCEEDED(hr) && m_d2dBitmap != nullptr) {
 			// render current bitmap to background before load the next
 			m_backgroundTarget->BeginDraw();
 			m_backgroundTarget->SetTransform(D2D1::Matrix3x2F::Identity());
 
-			ID2D1SolidColorBrush *brush;
+			ID2D1SolidColorBrush *brush = nullptr;
 			m_backgroundTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, BACKGROUND_DARKEN), &brush);
-			m_backgroundTarget->FillRectangle(D2D1::RectF(0.f, 0.f, screenWidth, screenHeight), brush);
-			brush->Release();
+			if (brush != nullptr) {
+				m_backgroundTarget->FillRectangle(D2D1::RectF(0.f, 0.f, screenWidth, screenHeight), brush);
+				brush->Release();
+			}
 
 			m_backgroundTarget->DrawBitmap(m_d2dBitmap, m_bitmapRect);
 			m_backgroundTarget->EndDraw();
 		}
 
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			// Need to release the previous D2DBitmap if there is one
 			SafeRelease(m_d2dBitmap);
 			hr = m_renderTarget->CreateBitmapFromWicBitmap(m_bitmapConverter, nullptr, &m_d2dBitmap);
 		}
 
-		if (SUCCEEDED(hr))
-		{
+		if (SUCCEEDED(hr)) {
 			auto rtSize = m_d2dBitmap->GetSize();
 			auto imgWidth = rtSize.width;
 			auto imgHeight = rtSize.height;
@@ -340,11 +314,13 @@ PhotoShow::OnPaint(HWND hWnd)
 			m_renderTarget->DrawBitmap(background, m_screenRect);
 		}
 
-		ID2D1SolidColorBrush *brush;
+		ID2D1SolidColorBrush *brush = nullptr;
 		m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black, BACKGROUND_DARKEN), &brush);
-		brush->SetOpacity(m_animProgress);
-		m_renderTarget->FillRectangle(m_screenRect, brush);
-		brush->Release();
+		if (brush != nullptr) {
+			brush->SetOpacity(m_animProgress);
+			m_renderTarget->FillRectangle(m_screenRect, brush);
+			brush->Release();
+		}
 
 		// D2DBitmap may have been released due to device loss. 
 		// If so, re-create it from the source bitmap

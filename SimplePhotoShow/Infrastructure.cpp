@@ -25,6 +25,8 @@ static std::ofstream logFile("R:/photoshow_infrastructure.txt");
 #define DEBUG_LOG(x)
 #endif
 
+#pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version = '6.0.0.0' processorArchitecture = '*' publicKeyToken = '6595b64144ccf1df' language = '*'\"")
+
 namespace
 {
 	bool GetRegistryValue(HKEY key, LPCTSTR name, std::wstring &value)
@@ -32,13 +34,10 @@ namespace
 		DWORD dwtype = 0;
 		DWORD dsize = 0;
 		int sizeOfChar = sizeof(wchar_t);
-		if (RegQueryValueEx(key, name, NULL, &dwtype, NULL, &dsize) == ERROR_SUCCESS)
-		{
-			if (dwtype == REG_SZ || dwtype == REG_EXPAND_SZ)
-			{
+		if (RegQueryValueEx(key, name, NULL, &dwtype, NULL, &dsize) == ERROR_SUCCESS) {
+			if (dwtype == REG_SZ || dwtype == REG_EXPAND_SZ) {
 				value.resize(dsize / sizeOfChar);
-				if (RegQueryValueEx(key, name, NULL, NULL, (LPBYTE)value.data(), &dsize) == ERROR_SUCCESS)
-				{
+				if (RegQueryValueEx(key, name, NULL, NULL, (LPBYTE)value.data(), &dsize) == ERROR_SUCCESS) {
 					// the result includes last null byte
 					value.resize(value.size() - 1);
 					return true;
@@ -58,8 +57,7 @@ namespace
 	bool GetRegistryValue(HKEY key, LPCTSTR name, bool &value)
 	{
 		int32_t intValue;
-		if (GetRegistryValue(key, name, intValue))
-		{
+		if (GetRegistryValue(key, name, intValue)) {
 			value = intValue != 0;
 			return true;
 		}
@@ -85,8 +83,7 @@ namespace
 	void GetConfig(std::wstring &folders, int &interval, bool &shuffle)
 	{
 		HKEY key;
-		if (RegOpenKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS)
-		{
+		if (RegOpenKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS) {
 			GetRegistryValue(key, L"Folders", folders);
 			GetRegistryValue(key, L"Interval", interval);
 			GetRegistryValue(key, L"Shuffle", shuffle);
@@ -97,8 +94,7 @@ namespace
 	void SetConfig(const std::wstring &folders, int interval, bool shuffle)
 	{
 		HKEY key;
-		if (RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL) == ERROR_SUCCESS)
-		{
+		if (RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL) == ERROR_SUCCESS) {
 			SetRegistryValue(key, L"Folders", folders);
 			SetRegistryValue(key, L"Interval", interval);
 			SetRegistryValue(key, L"Shuffle", shuffle);
@@ -121,8 +117,7 @@ namespace
 	std::vector<std::wstring> buildFileList(const std::wstring &foldersStr, bool shuffle)
 	{
 		std::vector<std::wstring> folders;
-		if (!foldersStr.empty())
-		{
+		if (!foldersStr.empty()) {
 			std::wregex re(L"\\r\\n");
 			std::copy(std::wsregex_token_iterator(foldersStr.begin(), foldersStr.end(), re, -1),
 				std::wsregex_token_iterator(),
@@ -130,21 +125,18 @@ namespace
 		}
 
 		std::vector<std::wstring> result;
-		for (const std::wstring &dirPath : folders)
-		{
+		for (const std::wstring &dirPath : folders) {
 			std::vector<std::wstring> fileNameList;
 			ListFilesInDirectory(dirPath, fileNameList, [](const std::wstring &name) {
 				return EndsWith(name, std::wstring(L".jpg")) ||
 					EndsWith(name, std::wstring(L".jpeg")) ||
 					EndsWith(name, std::wstring(L".png"));
 			});
-			for (const std::wstring &fileName : fileNameList)
-			{
+			for (const std::wstring &fileName : fileNameList) {
 				result.push_back(dirPath + L"\\" + fileName);
 			}
 		}
-		if (shuffle)
-		{
+		if (shuffle) {
 			std::shuffle(result.begin(), result.end(), std::random_device());
 		}
 		return result;
@@ -176,16 +168,14 @@ namespace
 		DEBUG_LOG("LoadNexImages hMonitor: " << (int)hMonitor << " Rect: " << lprcMonitor->left << ' ' << lprcMonitor->top << ' ' << lprcMonitor->right << ' ' << lprcMonitor->bottom);
 		LoadImageParam* param = (LoadImageParam*)dwData;
 		HWND hWnd = param->hWnd;
-		if (param->waitIndex <= 0)
-		{
+		if (param->waitIndex <= 0) {
 			std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
-			if (photoShow == nullptr)
-			{
+			if (photoShow == nullptr) {
 				RECT rect;
 				GetClientRect(hWnd, &rect);
 				DEBUG_LOG("GetClientRect: " << rect.left << ' ' << rect.top << ' ' << rect.right << ' ' << rect.bottom);
-				if (s_shuffleImages)
-				{
+				// shuffle again to avoid same image sequence on different monitors
+				if (s_shuffleImages) {
 					std::shuffle(s_imageFileList.begin(), s_imageFileList.end(), std::random_device());
 				}
 				photoShow.reset(new PhotoShow(rect.right, rect.bottom, D2D1::RectF((FLOAT)lprcMonitor->left, (FLOAT)lprcMonitor->top, (FLOAT)lprcMonitor->right, (FLOAT)lprcMonitor->bottom), s_imageFileList), RefCntDeleter());
@@ -212,43 +202,79 @@ namespace
 		}
 		return TRUE;
 	}
+
+	static int loadInterval = 10;
+	static int currentIndex = 0;
+
+	void StartSlideShow(HWND hWnd)
+	{
+		std::wstring folders;
+		GetConfig(folders, loadInterval, s_shuffleImages);
+
+		s_imageFileList = buildFileList(folders, false);
+
+		EnumDisplayMonitors(nullptr, nullptr, &GetOffsets, 0);
+
+		LoadImageParam param;
+		param.hWnd = hWnd;
+		param.waitIndex = -1;
+		EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
+
+#ifdef _DEBUG
+		SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, 100, NULL);
+#else
+		SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
+#endif
+	}
+
+	void StopSlideShow(HWND hWnd)
+	{
+		s_photoShows.clear();
+		KillTimer(hWnd, NEXT_IMAGE_TIMER_ID);
+	}
+
+	void OnTimerTimeout(HWND hWnd, WPARAM wParam)
+	{
+		if (wParam == NEXT_IMAGE_TIMER_ID) {
+#ifdef _DEBUG
+			static bool sentToBack = false;
+			if (!sentToBack) {
+				SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+				SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
+				sentToBack = true;
+			}
+			else
+#endif
+			{
+				if (currentIndex <= 0)
+				{
+					currentIndex = s_photoShows.size();
+				}
+				LoadImageParam param;
+				param.hWnd = hWnd;
+				param.waitIndex = --currentIndex;
+				EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
+			}
+		}
+	}
 }
+
+#ifndef STANDALONE
 
 LRESULT WINAPI
 ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	static int loadInterval = 10;
-	static int currentIndex = 0;
-
 	switch (message)
 	{
 		case WM_CREATE:
-		{
-			std::wstring folders;
-			GetConfig(folders, loadInterval, s_shuffleImages);
-
-			s_imageFileList = buildFileList(folders, false);
-
-			EnumDisplayMonitors(nullptr, nullptr, &GetOffsets, 0);
-
-			LoadImageParam param;
-			param.hWnd = hWnd;
-			param.waitIndex = -1;
-			EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
-
-#ifdef _DEBUG
-			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, 100, NULL);
-#else
-			SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
-#endif
+			StartSlideShow(hWnd);
 			return S_OK;
-		}
 		case WM_DESTROY:
-		{
-			s_photoShows.clear();
-			KillTimer(hWnd, NEXT_IMAGE_TIMER_ID);
+			StopSlideShow(hWnd);
 			break;
-		}
+		case WM_TIMER:
+			OnTimerTimeout(hWnd, wParam);
+			return S_OK;
 		case WM_PAINT:
 		{
 			PAINTSTRUCT ps;
@@ -257,32 +283,6 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				DEBUG_LOG("Dirty Rect: " << ps.rcPaint.left << ' ' << ps.rcPaint.top << ' ' << ps.rcPaint.right << ' ' << ps.rcPaint.bottom);
 				EnumDisplayMonitors(ps.hdc, &ps.rcPaint, &CallOnPaint, (LPARAM)hWnd);
 				EndPaint(hWnd, &ps);
-			}
-			return S_OK;
-		}
-		case WM_TIMER:
-		{
-			if (wParam == NEXT_IMAGE_TIMER_ID)
-			{
-#ifdef _DEBUG
-				static bool sentToBack = false;
-				if (!sentToBack) {
-					SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-					SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
-					sentToBack = true;
-				}
-				else
-#endif
-				{
-					if (currentIndex <= 0)
-					{
-						currentIndex = s_photoShows.size();
-					}
-					LoadImageParam param;
-					param.hWnd = hWnd;
-					param.waitIndex = --currentIndex;
-					EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
-				}
 			}
 			return S_OK;
 		}
@@ -302,6 +302,7 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 	return DefScreenSaverProc(hWnd, message, wParam, lParam);
 }
+#endif // !STANDALONE
 
 BOOL WINAPI
 ScreenSaverConfigureDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
@@ -381,5 +382,120 @@ RegisterDialogClasses(HANDLE hInst)
 	return TRUE;
 }
 
+#ifdef STANDALONE
 
-#pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version = '6.0.0.0' processorArchitecture = '*' publicKeyToken = '6595b64144ccf1df' language = '*'\"")
+WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
+void ShowFullscreen(HWND hwnd, bool fullscreen)
+{
+	DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
+	if (fullscreen) {
+		MONITORINFO mi = { sizeof(mi) };
+		if (GetWindowPlacement(hwnd, &g_wpPrev) && GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
+			SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+			SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+		}
+	}
+	else {
+		SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+		SetWindowPlacement(hwnd, &g_wpPrev);
+		SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+	}
+}
+
+static bool isRunning = false;
+
+LRESULT CALLBACK
+WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+	switch (uMsg)
+	{
+		case WM_DESTROY:
+			PostQuitMessage(0);
+			return 0;
+		case WM_TIMER:
+			OnTimerTimeout(hWnd, wParam);
+			return S_OK;
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			if (BeginPaint(hWnd, &ps))
+			{
+				if (isRunning) {
+					DEBUG_LOG("Dirty Rect: " << ps.rcPaint.left << ' ' << ps.rcPaint.top << ' ' << ps.rcPaint.right << ' ' << ps.rcPaint.bottom);
+					EnumDisplayMonitors(ps.hdc, &ps.rcPaint, &CallOnPaint, (LPARAM)hWnd);
+				}
+				else {
+					FillRect(ps.hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
+				}
+				EndPaint(hWnd, &ps);
+			}
+			return S_OK;
+		}
+		case WM_KEYDOWN:
+			if (wParam == VK_ESCAPE) {
+				if (isRunning) {
+					StopSlideShow(hWnd);
+					ShowFullscreen(hWnd, false);
+					InvalidateRect(hWnd, nullptr, true);
+					isRunning = false;
+				}
+			}
+			else if (wParam == VK_RETURN && GetKeyState(VK_CONTROL) != 0) {
+				if (!isRunning) {
+					ShowFullscreen(hWnd, true);
+					StartSlideShow(hWnd);
+					isRunning = true;
+				}
+			}
+			return S_OK;
+		return 0;
+	}
+
+	return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+static const TCHAR* windowClassName = TEXT("SimplePhotoShow Class");
+
+int WINAPI
+wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
+{
+	WNDCLASSEX wc;
+	memset(&wc, 0, sizeof(WNDCLASSEX));
+	wc.cbSize = sizeof(WNDCLASSEX);
+	wc.lpfnWndProc = &WindowProc;
+	wc.hInstance = hInstance;
+	wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
+	wc.lpszClassName = windowClassName;
+	wc.hIcon = (HICON)LoadImage(wc.hInstance, MAKEINTRESOURCE(ID_APP), IMAGE_ICON, 32, 32, LR_SHARED);
+	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+	if (!RegisterClassEx(&wc)) {
+		MessageBox(NULL, TEXT("Window Registration Failed"), TEXT("ERROR!"), MB_OK | MB_ICONERROR);
+		return -1;
+	}
+
+	HWND hwnd = CreateWindowEx(0, windowClassName, TEXT("Simple PhotoShow"),
+		WS_OVERLAPPEDWINDOW,            // Window style
+		CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, // Size and position
+		NULL,       // Parent window    
+		NULL,       // Menu
+		hInstance,  // Instance handle
+		NULL        // Additional application data
+	);
+
+	if (hwnd == NULL) {
+		return 0;
+	}
+
+	ShowWindow(hwnd, nCmdShow);
+
+	MSG msg = { };
+	while (GetMessage(&msg, NULL, 0, 0))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+
+	return 0;
+}
+
+#endif

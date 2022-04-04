@@ -1,5 +1,7 @@
 Debug/
 Release/
+StandaloneDebug/
+StandaloneRelease/
 .vs/
 *.sdf
 *.opensdf
