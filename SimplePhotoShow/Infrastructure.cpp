@@ -12,8 +12,11 @@
 #include "FileUtil.h"
 #include "StringUtil.h"
 
+#include <dwmapi.h>
+
 //define a Windows timer 
-#define NEXT_IMAGE_TIMER_ID 1 
+#define NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID 1 
+#define NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID 2
 
 //#define WITH_DEBUG_LOG
 
@@ -144,9 +147,9 @@ namespace
 
 	bool s_shuffleImages;
 	std::vector<std::wstring> s_imageFileList;
-	std::map<HMONITOR, std::shared_ptr<PhotoShow>> s_photoShows;
-	LONG s_offsetLeft;
-	LONG s_offsetTop;
+	std::map<LPVOID, std::shared_ptr<PhotoShow>> s_photoShows;
+	LONG s_offsetLeft = 0;
+	LONG s_offsetTop = 0;
 
 	struct LoadImageParam
 	{
@@ -161,15 +164,12 @@ namespace
 		return TRUE;
 	}
 
-	BOOL CALLBACK LoadNextImages(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+	BOOL CALLBACK DoLoadNextImage(LPVOID screenId, LPRECT lpRect, LoadImageParam* lpParam)
 	{
-		OffsetRect(lprcMonitor, -s_offsetLeft, -s_offsetTop);
-
-		DEBUG_LOG("LoadNexImages hMonitor: " << (int)hMonitor << " Rect: " << lprcMonitor->left << ' ' << lprcMonitor->top << ' ' << lprcMonitor->right << ' ' << lprcMonitor->bottom);
-		LoadImageParam* param = (LoadImageParam*)dwData;
-		HWND hWnd = param->hWnd;
-		if (param->waitIndex <= 0) {
-			std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
+		DEBUG_LOG("LoadNexImages hMonitor: " << (int)hMonitor << " Rect: " << lpRect->left << ' ' << lpRect->top << ' ' << lpRect->right << ' ' << lpRect->bottom);
+		HWND hWnd = lpParam->hWnd;
+		if (lpParam->waitIndex <= 0) {
+			std::shared_ptr<PhotoShow>& photoShow = s_photoShows[screenId];
 			if (photoShow == nullptr) {
 				RECT rect;
 				GetClientRect(hWnd, &rect);
@@ -178,82 +178,113 @@ namespace
 				if (s_shuffleImages) {
 					std::shuffle(s_imageFileList.begin(), s_imageFileList.end(), std::random_device());
 				}
-				photoShow.reset(new PhotoShow(rect.right, rect.bottom, D2D1::RectF((FLOAT)lprcMonitor->left, (FLOAT)lprcMonitor->top, (FLOAT)lprcMonitor->right, (FLOAT)lprcMonitor->bottom), s_imageFileList), RefCntDeleter());
+				photoShow.reset(new PhotoShow(rect.right, rect.bottom, D2D1::RectF((FLOAT)lpRect->left, (FLOAT)lpRect->top, (FLOAT)lpRect->right, (FLOAT)lpRect->bottom), s_imageFileList), RefCntDeleter());
 			}
 			photoShow->LoadNextImage(hWnd);
-			return param->waitIndex < 0 ? TRUE : FALSE;
+			return lpParam->waitIndex < 0 ? TRUE : FALSE;
 		}
-		param->waitIndex -= 1;
+		lpParam->waitIndex -= 1;
+		return TRUE;
+	}
+	
+	BOOL CALLBACK LoadNextImage(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
+	{
+		OffsetRect(lprcMonitor, -s_offsetLeft, -s_offsetTop);
+		LoadImageParam* param = (LoadImageParam*)dwData;
+		return DoLoadNextImage((LPVOID)hMonitor, lprcMonitor, param);
+	}
+
+	BOOL CALLBACK DoCallOnPaint(LPVOID screenId, LPRECT lpRect, HWND hWnd)
+	{
+		DEBUG_LOG("CallOnPaint hMonitor: " << (int)hMonitor << " Rect: " << lpRect->left << ' ' << lpRect->top << ' ' << lpRect->right << ' ' << lpRect->bottom);
+		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[screenId];
+		if (photoShow != nullptr)
+		{
+			RECT r;
+			photoShow->GetRect(&r);
+			if (IntersectRect(&r, &r, lpRect) == TRUE)
+			{
+				photoShow->OnPaint(hWnd);
+			}
+		}
 		return TRUE;
 	}
 
 	BOOL CALLBACK CallOnPaint(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
 	{
-		DEBUG_LOG("CallOnPaint hMonitor: " << (int)hMonitor << " Rect: " << lprcMonitor->left << ' ' << lprcMonitor->top << ' ' << lprcMonitor->right << ' ' << lprcMonitor->bottom);
-		std::shared_ptr<PhotoShow>& photoShow = s_photoShows[hMonitor];
-		if (photoShow != nullptr)
-		{
-			RECT r;
-			photoShow->GetRect(&r);
-			if (IntersectRect(&r, &r, lprcMonitor) == TRUE)
-			{
-				photoShow->OnPaint((HWND)dwData);
-			}
-		}
-		return TRUE;
+		return DoCallOnPaint((LPVOID)hMonitor, lprcMonitor, (HWND)dwData);
 	}
 
 	static int loadInterval = 10;
 	static int currentIndex = 0;
 
-	void StartSlideShow(HWND hWnd)
+	void StartSlideShow(HWND hWnd, bool allDisplays)
 	{
 		std::wstring folders;
 		GetConfig(folders, loadInterval, s_shuffleImages);
 
 		s_imageFileList = buildFileList(folders, false);
 
-		EnumDisplayMonitors(nullptr, nullptr, &GetOffsets, 0);
+		if (allDisplays) {
+			EnumDisplayMonitors(nullptr, nullptr, &GetOffsets, 0);
+		}
 
 		LoadImageParam param;
 		param.hWnd = hWnd;
 		param.waitIndex = -1;
-		EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
+
+		if (allDisplays) {
+			EnumDisplayMonitors(nullptr, nullptr, &LoadNextImage, (LPARAM)&param);
+		}
+		else {
+			RECT r;
+			GetClientRect(hWnd, &r);
+			DoLoadNextImage(0, &r, &param);
+		}
+
+		UINT_PTR timerId = allDisplays ? NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID : NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID;
 
 #ifdef _DEBUG
-		SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, 100, NULL);
+		SetTimer(hWnd, timerId, 100, NULL);
 #else
-		SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
+		SetTimer(hWnd, timerId, loadInterval * 1000, NULL);
 #endif
 	}
 
-	void StopSlideShow(HWND hWnd)
+	void StopSlideShow(HWND hWnd, bool allDisplays)
 	{
 		s_photoShows.clear();
-		KillTimer(hWnd, NEXT_IMAGE_TIMER_ID);
+		KillTimer(hWnd, allDisplays ? NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID : NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID);
 	}
 
 	void OnTimerTimeout(HWND hWnd, WPARAM wParam)
 	{
-		if (wParam == NEXT_IMAGE_TIMER_ID) {
+		if (wParam == NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID || wParam == NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID) {
 #ifdef _DEBUG
 			static bool sentToBack = false;
 			if (!sentToBack) {
 				SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-				SetTimer(hWnd, NEXT_IMAGE_TIMER_ID, loadInterval * 1000, NULL);
+				SetTimer(hWnd, wParam, loadInterval * 1000, NULL);
 				sentToBack = true;
 			}
 			else
 #endif
 			{
-				if (currentIndex <= 0)
-				{
+				if (currentIndex <= 0) {
 					currentIndex = s_photoShows.size();
 				}
 				LoadImageParam param;
 				param.hWnd = hWnd;
 				param.waitIndex = --currentIndex;
-				EnumDisplayMonitors(nullptr, nullptr, &LoadNextImages, (LPARAM)&param);
+
+				if (wParam == NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID) {
+					EnumDisplayMonitors(nullptr, nullptr, &LoadNextImage, (LPARAM)&param);
+				}
+				else {
+					RECT r;
+					GetClientRect(hWnd, &r);
+					DoLoadNextImage(0, &r, &param);
+				}
 			}
 		}
 	}
@@ -267,10 +298,10 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 		case WM_CREATE:
-			StartSlideShow(hWnd);
+			StartSlideShow(hWnd, true);
 			return S_OK;
 		case WM_DESTROY:
-			StopSlideShow(hWnd);
+			StopSlideShow(hWnd, true);
 			break;
 		case WM_TIMER:
 			OnTimerTimeout(hWnd, wParam);
@@ -395,7 +426,7 @@ void ShowFullscreen(HWND hwnd, bool fullscreen)
 			SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 		}
 	}
-	else {
+	else if ((dwStyle & WS_OVERLAPPEDWINDOW) != WS_OVERLAPPEDWINDOW) {
 		SetWindowLong(hwnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
 		SetWindowPlacement(hwnd, &g_wpPrev);
 		SetWindowPos(hwnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
@@ -422,7 +453,7 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			{
 				if (isRunning) {
 					DEBUG_LOG("Dirty Rect: " << ps.rcPaint.left << ' ' << ps.rcPaint.top << ' ' << ps.rcPaint.right << ' ' << ps.rcPaint.bottom);
-					EnumDisplayMonitors(ps.hdc, &ps.rcPaint, &CallOnPaint, (LPARAM)hWnd);
+					DoCallOnPaint(0, &ps.rcPaint, hWnd);
 				}
 				else {
 					FillRect(ps.hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
@@ -434,7 +465,7 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		case WM_KEYDOWN:
 			if (wParam == VK_ESCAPE) {
 				if (isRunning) {
-					StopSlideShow(hWnd);
+					StopSlideShow(hWnd, false);
 					ShowFullscreen(hWnd, false);
 					InvalidateRect(hWnd, nullptr, true);
 					isRunning = false;
@@ -442,8 +473,10 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			}
 			else if (wParam == VK_RETURN && GetKeyState(VK_CONTROL) != 0) {
 				if (!isRunning) {
-					ShowFullscreen(hWnd, true);
-					StartSlideShow(hWnd);
+					if (GetKeyState(VK_SHIFT) == 0) {
+						ShowFullscreen(hWnd, true);
+					}
+					StartSlideShow(hWnd, false);
 					isRunning = true;
 				}
 			}
@@ -485,6 +518,9 @@ wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdS
 	if (hwnd == NULL) {
 		return 0;
 	}
+
+	BOOL USE_DARK_MODE = true;
+	DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE::DWMWA_USE_IMMERSIVE_DARK_MODE, &USE_DARK_MODE, sizeof(USE_DARK_MODE));
 
 	ShowWindow(hwnd, nCmdShow);
 
