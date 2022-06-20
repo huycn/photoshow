@@ -471,9 +471,9 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 					isRunning = false;
 				}
 			}
-			else if (wParam == VK_RETURN && GetKeyState(VK_CONTROL) != 0) {
+			else if (wParam == VK_RETURN && GetAsyncKeyState(VK_CONTROL) < 0) {
 				if (!isRunning) {
-					if (GetKeyState(VK_SHIFT) == 0) {
+					if (GetAsyncKeyState(VK_SHIFT) >= 0) {
 						ShowFullscreen(hWnd, true);
 					}
 					StartSlideShow(hWnd, false);
