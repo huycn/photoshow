@@ -72,7 +72,7 @@ namespace
 		return result;
 	}
 
-	bool s_shuffleImages;
+	bool s_shuffleImages = true;
 	std::vector<std::wstring> s_imageFileList;
 	std::map<LPVOID, std::shared_ptr<PhotoShow>> s_photoShows;
 	LONG s_offsetLeft = 0;
@@ -142,11 +142,11 @@ namespace
 		return DoCallOnPaint((LPVOID)hMonitor, lprcMonitor, (HWND)dwData);
 	}
 
-	static int loadInterval = 10;
 	static int currentIndex = 0;
 
 	void StartSlideShow(HWND hWnd, bool isScreenSaver, const Configuration &config)
 	{
+		s_shuffleImages = config.shuffle;
 		if (!isScreenSaver && config.transparency > 0) {
 			SetWindowLong(hWnd, GWL_EXSTYLE, (GetWindowLong(hWnd, GWL_EXSTYLE) & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT)) | WS_EX_LAYERED | (config.clickThrough ? WS_EX_TRANSPARENT : 0));
 			if (config.clickThrough) {
@@ -179,7 +179,7 @@ namespace
 #ifdef _DEBUG
 		SetTimer(hWnd, timerId, 100, NULL);
 #else
-		SetTimer(hWnd, timerId, loadInterval * 1000, NULL);
+		SetTimer(hWnd, timerId, config.interval * 1000, NULL);
 #endif
 	}
 
