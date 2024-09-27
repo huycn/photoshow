@@ -303,7 +303,7 @@ PhotoShow::OnPaint(HWND hWnd)
 	// Create render target if not yet created
 	HRESULT hr = CreateDeviceResources(hWnd);
 
-	if (SUCCEEDED(hr) && !(m_renderTarget->CheckWindowState() & D2D1_WINDOW_STATE_OCCLUDED))
+	if (SUCCEEDED(hr) && m_renderTarget != nullptr && m_backgroundTarget != nullptr && !(m_renderTarget->CheckWindowState() & D2D1_WINDOW_STATE_OCCLUDED))
 	{
 		m_renderTarget->BeginDraw();
 		m_renderTarget->SetTransform(D2D1::Matrix3x2F::Identity());

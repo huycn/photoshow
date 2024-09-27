@@ -11,6 +11,7 @@
 #include "resource.h"
 #include "FileUtil.h"
 #include "StringUtil.h"
+#include "Configuration.h"
 
 #include <dwmapi.h>
 
@@ -32,80 +33,6 @@ static std::ofstream logFile("R:/photoshow_infrastructure.txt");
 
 namespace
 {
-	bool GetRegistryValue(HKEY key, LPCTSTR name, std::wstring &value)
-	{
-		DWORD dwtype = 0;
-		DWORD dsize = 0;
-		int sizeOfChar = sizeof(wchar_t);
-		if (RegQueryValueEx(key, name, NULL, &dwtype, NULL, &dsize) == ERROR_SUCCESS) {
-			if (dwtype == REG_SZ || dwtype == REG_EXPAND_SZ) {
-				value.resize(dsize / sizeOfChar);
-				if (RegQueryValueEx(key, name, NULL, NULL, (LPBYTE)value.data(), &dsize) == ERROR_SUCCESS) {
-					// the result includes last null byte
-					value.resize(value.size() - 1);
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	bool GetRegistryValue(HKEY key, LPCTSTR name, int32_t &value)
-	{
-		DWORD dwtype = 0;
-		DWORD dsize = sizeof(value);
-		return RegQueryValueEx(key, name, NULL, &dwtype, (LPBYTE)&value, &dsize) == ERROR_SUCCESS && dwtype == REG_DWORD;
-	}
-
-	bool GetRegistryValue(HKEY key, LPCTSTR name, bool &value)
-	{
-		int32_t intValue;
-		if (GetRegistryValue(key, name, intValue)) {
-			value = intValue != 0;
-			return true;
-		}
-		return false;
-	}
-
-	bool SetRegistryValue(HKEY key, LPCTSTR name, const std::wstring &value)
-	{
-		return RegSetValueEx(key, name, 0, REG_SZ, (LPBYTE)value.c_str(), (value.size() + 1) * sizeof(wchar_t)) == ERROR_SUCCESS;
-	}
-
-	bool SetRegistryValue(HKEY key, LPCTSTR name, int32_t value)
-	{
-		return RegSetValueEx(key, name, 0, REG_DWORD, (LPBYTE)&value, sizeof(int32_t)) == ERROR_SUCCESS;
-	}
-
-	bool SetRegistryValue(HKEY key, LPCTSTR name, bool value)
-	{
-		return SetRegistryValue(key, name, value ? 1 : 0);
-	}
-
-
-	void GetConfig(std::wstring &folders, int &interval, bool &shuffle)
-	{
-		HKEY key;
-		if (RegOpenKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, KEY_QUERY_VALUE, &key) == ERROR_SUCCESS) {
-			GetRegistryValue(key, L"Folders", folders);
-			GetRegistryValue(key, L"Interval", interval);
-			GetRegistryValue(key, L"Shuffle", shuffle);
-			RegCloseKey(key);
-		}
-	}
-
-	void SetConfig(const std::wstring &folders, int interval, bool shuffle)
-	{
-		HKEY key;
-		if (RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, NULL, 0, KEY_WRITE, NULL, &key, NULL) == ERROR_SUCCESS) {
-			SetRegistryValue(key, L"Folders", folders);
-			SetRegistryValue(key, L"Interval", interval);
-			SetRegistryValue(key, L"Shuffle", shuffle);
-			RegCloseKey(key);
-		}
-
-	}
-
 	std::wstring GetDlgEditTextValue(HWND hDlg, int itemId)
 	{
 		std::wstring text;
@@ -218,14 +145,19 @@ namespace
 	static int loadInterval = 10;
 	static int currentIndex = 0;
 
-	void StartSlideShow(HWND hWnd, bool allDisplays)
+	void StartSlideShow(HWND hWnd, bool isScreenSaver, const Configuration &config)
 	{
-		std::wstring folders;
-		GetConfig(folders, loadInterval, s_shuffleImages);
+		if (!isScreenSaver && config.transparency > 0) {
+			SetWindowLong(hWnd, GWL_EXSTYLE, (GetWindowLong(hWnd, GWL_EXSTYLE) & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT)) | WS_EX_LAYERED | (config.clickThrough ? WS_EX_TRANSPARENT : 0));
+			if (config.clickThrough) {
+				SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			}
+			SetLayeredWindowAttributes(hWnd, 0, 255 - config.transparency, LWA_ALPHA);
+		}
 
-		s_imageFileList = buildFileList(folders, false);
+		s_imageFileList = buildFileList(config.folders, config.shuffle);
 
-		if (allDisplays) {
+		if (isScreenSaver) {
 			EnumDisplayMonitors(nullptr, nullptr, &GetOffsets, 0);
 		}
 
@@ -233,7 +165,7 @@ namespace
 		param.hWnd = hWnd;
 		param.waitIndex = -1;
 
-		if (allDisplays) {
+		if (isScreenSaver) {
 			EnumDisplayMonitors(nullptr, nullptr, &LoadNextImage, (LPARAM)&param);
 		}
 		else {
@@ -242,7 +174,7 @@ namespace
 			DoLoadNextImage(0, &r, &param);
 		}
 
-		UINT_PTR timerId = allDisplays ? NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID : NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID;
+		UINT_PTR timerId = isScreenSaver ? NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID : NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID;
 
 #ifdef _DEBUG
 		SetTimer(hWnd, timerId, 100, NULL);
@@ -251,10 +183,14 @@ namespace
 #endif
 	}
 
-	void StopSlideShow(HWND hWnd, bool allDisplays)
+	void StopSlideShow(HWND hWnd, bool isScreenSaver)
 	{
 		s_photoShows.clear();
-		KillTimer(hWnd, allDisplays ? NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID : NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID);
+		KillTimer(hWnd, isScreenSaver ? NEXT_IMAGE_ALL_DISPLAYS_TIMER_ID : NEXT_IMAGE_SINGLE_WINDOW_TIMER_ID);
+		if (!isScreenSaver) {
+			SetWindowLong(hWnd, GWL_EXSTYLE, (GetWindowLong(hWnd, GWL_EXSTYLE) & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT)));
+			SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		}
 	}
 
 	void OnTimerTimeout(HWND hWnd, WPARAM wParam)
@@ -298,7 +234,7 @@ ScreenSaverProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	switch (message)
 	{
 		case WM_CREATE:
-			StartSlideShow(hWnd, true);
+			StartSlideShow(hWnd, true, Configuration::Load());
 			return S_OK;
 		case WM_DESTROY:
 			StopSlideShow(hWnd, true);
@@ -342,15 +278,15 @@ ScreenSaverConfigureDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 	{
 		case WM_INITDIALOG:
 		{
-			std::wstring folders;
-			int interval = 10;
-			bool shuffle = true;
-			GetConfig(folders, interval, shuffle);
+			auto config = Configuration::Load();
 
-			SetDlgItemText(hDlg, IDC_FOLDERS, folders.c_str());
-			CheckDlgButton(hDlg, IDC_SHUFFLE, shuffle ? BST_CHECKED : BST_UNCHECKED);
-			SetDlgItemInt(hDlg, IDC_DELAY, interval, false);
-	
+			SetDlgItemText(hDlg, IDC_FOLDERS, config.folders.c_str());
+			CheckDlgButton(hDlg, IDC_SHUFFLE, config.shuffle ? BST_CHECKED : BST_UNCHECKED);
+			SetDlgItemInt(hDlg, IDC_DELAY, config.interval, false);
+			CheckDlgButton(hDlg, IDC_CLICK_THROUGH, config.clickThrough ? BST_CHECKED : BST_UNCHECKED);
+			SendDlgItemMessage(hDlg, IDC_TRANSPARENCY, TBM_SETRANGE, (WPARAM)TRUE, (LPARAM)MAKELONG(0, 255));
+			SendDlgItemMessage(hDlg, IDC_TRANSPARENCY, TBM_SETPOS, (WPARAM)TRUE, (LPARAM)config.transparency);
+
 			return TRUE;
 		}
 		case WM_COMMAND:
@@ -387,11 +323,13 @@ ScreenSaverConfigureDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam
 			}
 			else if (cmd == IDOK)
 			{
-				std::wstring folders = GetDlgEditTextValue(hDlg, IDC_FOLDERS);
-				bool shuffle = IsDlgButtonChecked(hDlg, IDC_SHUFFLE) == BST_CHECKED;
-				int interval = GetDlgItemInt(hDlg, IDC_DELAY, NULL, false);
-
-				SetConfig(folders, interval, shuffle);
+				Configuration config;
+				config.folders = GetDlgEditTextValue(hDlg, IDC_FOLDERS);
+				config.shuffle = IsDlgButtonChecked(hDlg, IDC_SHUFFLE) == BST_CHECKED;
+				config.interval = GetDlgItemInt(hDlg, IDC_DELAY, NULL, false);
+				config.transparency = static_cast<uint8_t>(SendDlgItemMessage(hDlg, IDC_TRANSPARENCY, TBM_GETPOS, NULL, NULL));
+				config.clickThrough = IsDlgButtonChecked(hDlg, IDC_CLICK_THROUGH) == BST_CHECKED;
+				config.Save();
 
 				EndDialog(hDlg, LOWORD(wParam) == IDOK);
 				return TRUE;
@@ -416,13 +354,17 @@ RegisterDialogClasses(HANDLE hInst)
 #ifdef STANDALONE
 
 WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
-void ShowFullscreen(HWND hwnd, bool fullscreen)
+void ShowFullscreen(HWND hwnd, bool fullscreen, bool clickThrough)
 {
 	DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
 	if (fullscreen) {
 		MONITORINFO mi = { sizeof(mi) };
 		if (GetWindowPlacement(hwnd, &g_wpPrev) && GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
-			SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+			if (clickThrough) {
+				SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_CAPTION);
+			} else {
+				SetWindowLong(hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+			}
 			SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 		}
 	}
@@ -435,7 +377,7 @@ void ShowFullscreen(HWND hwnd, bool fullscreen)
 
 static bool isRunning = false;
 
-LRESULT CALLBACK
+static LRESULT CALLBACK
 WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	switch (uMsg)
@@ -466,17 +408,21 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			if (wParam == VK_ESCAPE) {
 				if (isRunning) {
 					StopSlideShow(hWnd, false);
-					ShowFullscreen(hWnd, false);
+					ShowFullscreen(hWnd, false, false);
 					InvalidateRect(hWnd, nullptr, true);
 					isRunning = false;
 				}
 			}
+			else if (wParam == VK_F8) {
+				DialogBox(nullptr, MAKEINTRESOURCE(DLG_SCRNSAVECONFIGURE), hWnd, &ScreenSaverConfigureDialog);
+			}
 			else if (wParam == VK_RETURN && GetAsyncKeyState(VK_CONTROL) < 0) {
 				if (!isRunning) {
+					auto config = Configuration::Load();
 					if (GetAsyncKeyState(VK_SHIFT) >= 0) {
-						ShowFullscreen(hWnd, true);
+						ShowFullscreen(hWnd, true, config.transparency > 0 && config.clickThrough);
 					}
-					StartSlideShow(hWnd, false);
+					StartSlideShow(hWnd, false, config);
 					isRunning = true;
 				}
 			}
@@ -490,7 +436,7 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 static const TCHAR* windowClassName = TEXT("SimplePhotoShow Class");
 
 int WINAPI
-wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
+wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PWSTR pCmdLine, _In_ int nCmdShow)
 {
 	WNDCLASSEX wc;
 	memset(&wc, 0, sizeof(WNDCLASSEX));
