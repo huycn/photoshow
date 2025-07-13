@@ -200,7 +200,7 @@ namespace
 			static bool sentToBack = false;
 			if (!sentToBack) {
 				SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-				SetTimer(hWnd, wParam, loadInterval * 1000, NULL);
+				SetTimer(hWnd, wParam, 100 * 1000, NULL);
 				sentToBack = true;
 			}
 			else
@@ -375,7 +375,7 @@ void ShowFullscreen(HWND hwnd, bool fullscreen, bool clickThrough)
 	}
 }
 
-static bool isRunning = false;
+static int isRunning = 0;	// 0: not running; 1: running in window; 2: running in fullscreen
 
 static LRESULT CALLBACK
 WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -408,9 +408,15 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			if (wParam == VK_ESCAPE) {
 				if (isRunning) {
 					StopSlideShow(hWnd, false);
-					ShowFullscreen(hWnd, false, false);
+					if (isRunning == 2) {
+						ShowFullscreen(hWnd, false, false);
+					}
+					else {
+						DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+						SetWindowLong(hWnd, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+					}
 					InvalidateRect(hWnd, nullptr, true);
-					isRunning = false;
+					isRunning = 0;
 				}
 			}
 			else if (wParam == VK_F8) {
@@ -421,9 +427,14 @@ WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 					auto config = Configuration::Load();
 					if (GetAsyncKeyState(VK_SHIFT) >= 0) {
 						ShowFullscreen(hWnd, true, config.transparency > 0 && config.clickThrough);
+						isRunning = 2;
+					}
+					else {
+						DWORD dwStyle = GetWindowLong(hWnd, GWL_STYLE);
+						SetWindowLong(hWnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+						isRunning = 1;
 					}
 					StartSlideShow(hWnd, false, config);
-					isRunning = true;
 				}
 			}
 			return S_OK;
