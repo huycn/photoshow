@@ -62,7 +62,6 @@ namespace {
 	{
 		return SetRegistryValue(key, name, value ? 1 : 0);
 	}
-
 }
 
 Configuration::Configuration()

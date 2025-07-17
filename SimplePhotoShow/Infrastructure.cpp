@@ -353,7 +353,7 @@ RegisterDialogClasses(HANDLE hInst)
 
 #ifdef STANDALONE
 
-WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
+WINDOWPLACEMENT g_wpPrev = { sizeof(WINDOWPLACEMENT) };
 void ShowFullscreen(HWND hwnd, bool fullscreen, bool clickThrough)
 {
 	DWORD dwStyle = GetWindowLong(hwnd, GWL_STYLE);
@@ -377,12 +377,80 @@ void ShowFullscreen(HWND hwnd, bool fullscreen, bool clickThrough)
 
 static int isRunning = 0;	// 0: not running; 1: running in window; 2: running in fullscreen
 
+static void SaveWindowPlacement(HWND hwnd)
+{
+	WINDOWPLACEMENT wp = { sizeof(WINDOWPLACEMENT) };
+	WINDOWPLACEMENT* pWp = nullptr;
+	if (isRunning == 2) {
+		pWp = &g_wpPrev;
+	}
+	else {
+		if (!GetWindowPlacement(hwnd, &wp)) {
+			return;
+		}
+		pWp = &wp;
+	}
+
+	HKEY hKey;
+	if (RegCreateKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+		RegSetValueEx(hKey, L"WindowPlacement", 0, REG_BINARY, (BYTE*)pWp, sizeof(WINDOWPLACEMENT));
+		RegCloseKey(hKey);
+	}
+}
+
+static bool IsRectVisibleOnAnyMonitor(const RECT& rect)
+{
+	HMONITOR hMonitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONULL);
+	return hMonitor != NULL;
+}
+
+static void EnsureWindowPlacementVisible(WINDOWPLACEMENT& wp)
+{
+	RECT& r = wp.rcNormalPosition;
+	if (!IsRectVisibleOnAnyMonitor(r)) {
+		// Fallback: move to primary monitor
+		MONITORINFO mi = { sizeof(mi) };
+		HMONITOR hMon = MonitorFromPoint({ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+		if (GetMonitorInfo(hMon, &mi)) {
+			int width = r.right - r.left;
+			int height = r.bottom - r.top;
+
+			r.left = mi.rcWork.left + 50;
+			r.top = mi.rcWork.top + 50;
+			r.right = r.left + width;
+			r.bottom = r.top + height;
+
+			// Reset showCmd to normal (in case it was minimized or maximized off-screen)
+			wp.showCmd = SW_SHOWNORMAL;
+		}
+	}
+}
+
+static bool LoadWindowPlacement(HWND hwnd)
+{
+	WINDOWPLACEMENT wp = { sizeof(WINDOWPLACEMENT) };
+	HKEY hKey;
+	if (RegOpenKeyEx(HKEY_CURRENT_USER, L"Software\\SimpleSlideShow", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+		DWORD size = sizeof(wp);
+		if (RegQueryValueEx(hKey, L"WindowPlacement", NULL, NULL, (LPBYTE)&wp, &size) == ERROR_SUCCESS) {
+			EnsureWindowPlacementVisible(wp);
+			wp.showCmd = SW_SHOWNORMAL;	// always restore to normal position
+			SetWindowPlacement(hwnd, &wp);
+			RegCloseKey(hKey);
+			return true;
+		}
+		RegCloseKey(hKey);
+	}
+	return false;
+}
+
 static LRESULT CALLBACK
 WindowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	switch (uMsg)
 	{
 		case WM_DESTROY:
+			SaveWindowPlacement(hWnd);
 			PostQuitMessage(0);
 			return 0;
 		case WM_TIMER:
@@ -478,7 +546,8 @@ wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ PWSTR 
 
 	BOOL USE_DARK_MODE = true;
 	DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE::DWMWA_USE_IMMERSIVE_DARK_MODE, &USE_DARK_MODE, sizeof(USE_DARK_MODE));
-
+	
+	LoadWindowPlacement(hwnd);
 	ShowWindow(hwnd, nCmdShow);
 
 	MSG msg = { };
