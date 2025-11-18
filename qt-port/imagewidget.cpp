@@ -5,6 +5,7 @@
 #include <QOpenGLTexture>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLFramebufferObject>
+#include <QOpenGLPaintDevice>
 #include <iostream>
 
 static const int kAnimationFPS = 30;
@@ -191,9 +192,17 @@ void ImageWidget::startAnimation()
 
 void ImageWidget::stopAnimation()
 {
-    QRect fboRect(0, 0, m_bgFbo->width(), m_bgFbo->height());
-    QOpenGLFramebufferObject::blitFramebuffer(m_bgFbo.get(), fboRect, nullptr, fboRect, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    m_image.reset();
+    if (m_image != nullptr) {
+        QRect fboRect(0, 0, m_bgFbo->width(), m_bgFbo->height());
+        m_bgFbo->bind();
+        {
+            QOpenGLPaintDevice device(m_bgFbo->size());
+            QPainter(&device).fillRect(fboRect, QColor(0, 0, 0, static_cast<int>(kBackgroundDarken * 255)));
+        }
+        drawTexturedQuad(m_imageRect.left(), m_imageRect.top(), m_imageRect.width(), m_imageRect.height(), 1.0f);
+        m_bgFbo->release();
+        m_image.reset();
+    }
     m_animeTimer->stop();
 }
 
@@ -214,9 +223,9 @@ void ImageWidget::paintGL()
             QPainter(this).fillRect(fboRect, QColor(0, 0, 0, static_cast<int>(t * kBackgroundDarken * 255)));
         }
         drawTexturedQuad(m_imageRect.left(), m_imageRect.top(), m_imageRect.width(), m_imageRect.height(), t);
-    }
 
-    if (t >= 1.0f) {
-        stopAnimation();
+        if (t >= 1.0f) {
+            stopAnimation();
+        }
     }
 }
