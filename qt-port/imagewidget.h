@@ -16,7 +16,7 @@ class ImageWidget : public QOpenGLWidget, protected QOpenGLFunctions
     Q_OBJECT
 
 public:
-    explicit ImageWidget(QWidget* parent = nullptr);
+    explicit ImageWidget(QWidget* parent = nullptr, Qt::WindowFlags f = Qt::WindowFlags());
     virtual ~ImageWidget();
     void loadImage(const QImage &img, int x, int y, int w, int h);
 

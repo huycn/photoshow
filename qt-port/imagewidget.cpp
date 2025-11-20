@@ -11,8 +11,8 @@
 static const int kAnimationFPS = 30;
 static const float kBackgroundDarken = 0.6f;
 
-ImageWidget::ImageWidget(QWidget* parent)
-: QOpenGLWidget(parent)
+ImageWidget::ImageWidget(QWidget* parent, Qt::WindowFlags f)
+: QOpenGLWidget(parent, f)
 {
     m_animeTimer = new QTimer(this);
     connect(m_animeTimer, &QTimer::timeout, this, QOverload<>::of(&ImageWidget::update));

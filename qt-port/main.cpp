@@ -117,11 +117,9 @@ class SlideShow : public QObject {
 public:
     SlideShow(const QStringList &imageList, int interval, bool borderless, const QRect& geometry):
         _images(imageList),
+        _widget(nullptr, borderless ? Qt::FramelessWindowHint : Qt::Widget),
         _interval(interval)
     {
-        if (borderless) {
-            _widget.setWindowFlags(Qt::FramelessWindowHint);
-        }
         _widget.setGeometry(geometry);
         _loadTimer = new QTimer(this);
         QObject::connect(_loadTimer, &QTimer::timeout, this, &SlideShow::loadNextImage);
@@ -240,12 +238,14 @@ static void parseGeometry(const QString &geometry, int *x, int *y, int *width, i
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    app.setApplicationVersion("1.0.0");
 
-    QCommandLineOption borderless(QStringList() << "b" << "borderless", "Hide window title and border");
-    QCommandLineOption recursive(QStringList() << "r" << "recursive", "Scan directories recursively to look for images");
-    QCommandLineOption shuffle(QStringList() << "s" << "shuffle", "Shuffle image list once before start the show");
-    QCommandLineOption interval(QStringList() << "t" << "timeout", "Delay before loading next image", "seconds", "30");
-    QCommandLineOption geometry(QStringList() << "g" << "geometry", "Window geometry (position is ignored on Wayland)", "spec", "1080x768+0+0");
+    QCommandLineOption borderless(QStringList() << "b" << "borderless", "Hide window title and border.");
+    QCommandLineOption recursive(QStringList() << "r" << "recursive", "Scan directories recursively to look for images.");
+    QCommandLineOption shuffle(QStringList() << "s" << "shuffle", "Shuffle image list once before start the show.");
+    QCommandLineOption interval(QStringList() << "t" << "timeout", "Delay (seconds) before loading next image (default: 30).", "seconds", "30");
+    QCommandLineOption geometry(QStringList() << "g" << "geometry", "Window geometry (position is ignored on Wayland).", "spec", "1080x768+0+0");
+    QCommandLineOption formatfilter(QStringList() << "f" << "format", "List of image formats to scan (default: jpg,jpeg,png,webp).", "extentions", "");
 
     QCommandLineParser parser;
     parser.setApplicationDescription("Simple Slideshow");
@@ -256,11 +256,20 @@ int main(int argc, char *argv[])
     parser.addOption(interval);
     parser.addOption(borderless);
     parser.addOption(geometry);
+    parser.addOption(formatfilter);
     parser.process(app);
 
-    const QStringList args = parser.positionalArguments();
+    QStringList args = parser.positionalArguments();
+    QString extToScan = parser.value(formatfilter);
     QStringList filters;
-    filters << "*.png" << "*.jpg" << ".jpeg" << "*.PNG" << "*.JPG" << "*.JPEG";
+    if (extToScan.isEmpty()) {
+        filters = { "*.jpg", ".jpeg", "*.png", "*.webp"};
+    } else {
+        filters = extToScan.split(',', Qt::SkipEmptyParts);
+        for (auto& f : filters) {
+            f = "*." + f.trimmed();
+        }
+    }
 
     QStringList imageList;
     for (auto& path : args) {
