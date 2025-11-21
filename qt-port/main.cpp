@@ -146,8 +146,8 @@ private:
     std::vector<float> _weightValueY;
 
     void loadNextImage() {
-        _currentIndex = (_currentIndex + 1) % _images.size();
         while (true) {
+            _currentIndex = (_currentIndex + 1) % _images.size();
             const auto& filePath = _images[_currentIndex];
             QImage image(filePath);
             if (image.isNull()) {
