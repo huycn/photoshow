@@ -108,15 +108,17 @@ void ImageWidget::initializeGL()
     emit ready(w, h);
 }
 
-void ImageWidget::loadImage(const QImage &img, int x, int y, int w, int h)
+void ImageWidget::loadImage(QImage img, int x, int y, int w, int h)
 {
     if (m_shader == nullptr) {
         return;
     }
 
     m_imageRect.setRect(x, y, w, h);
-    m_image.reset(new QOpenGLTexture(img.convertToFormat(QImage::Format_RGBA8888)));
-    m_image->setMinificationFilter(QOpenGLTexture::LinearMipMapLinear);
+    // in-place for 32-bit sources, avoids a second full-size buffer, img's memory must not be shared for it to work.
+    img.convertTo(QImage::Format_RGBA8888);
+    m_image.reset(new QOpenGLTexture(img, QOpenGLTexture::DontGenerateMipMaps));
+    m_image->setMinificationFilter(QOpenGLTexture::Linear);
     m_image->setMagnificationFilter(QOpenGLTexture::Linear);
     m_image->setWrapMode(QOpenGLTexture::ClampToEdge);
 

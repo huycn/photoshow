@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QImageReader>
 #include <QRegularExpression>
 #include "imagewidget.h"
 #include <iostream>
@@ -149,7 +150,17 @@ private:
         while (true) {
             _currentIndex = (_currentIndex + 1) % _images.size();
             const auto& filePath = _images[_currentIndex];
-            QImage image(filePath);
+            QImageReader reader(filePath);
+            QSize srcSize = reader.size();
+            auto imgWidth = srcSize.width();
+            auto imgHeight = srcSize.height();
+            auto maxWidth = _widget.width();
+            auto maxHeight = _widget.height();
+            if (imgWidth > maxWidth || imgHeight > maxHeight) {
+                std::tie(imgWidth, imgHeight) = scaleToFit(imgWidth, imgHeight, maxWidth, maxHeight);
+                reader.setScaledSize(QSize(imgWidth, imgHeight));
+            }
+            QImage image = reader.read();
             if (image.isNull()) {
                 std::cerr << "Could not load image " << filePath.toStdString() << std::endl;
                 if (_currentIndex + 1 >= _images.size()) {
@@ -157,16 +168,11 @@ private:
                 }
                 continue;
             }
-            auto imgWidth = image.width();
-            auto imgHeight = image.height();
-            auto maxWidth = _widget.width();
-            auto maxHeight = _widget.height();
-            if (imgWidth > maxWidth || imgHeight > maxHeight) {
-                std::tie(imgWidth, imgHeight) = scaleToFit(imgWidth, imgHeight, maxWidth, maxHeight); // m_renderTarget->GetSize();
-            }
+            imgWidth = image.width();
+            imgHeight = image.height();
             auto newX = peekaboo(_randomizer, _weightPosX, _weightValueX, imgWidth);
             auto newY = peekaboo(_randomizer, _weightPosY, _weightValueY, imgHeight);
-            _widget.loadImage(image, roundToNearest(newX), roundToNearest(newY), imgWidth, imgHeight);
+            _widget.loadImage(std::move(image), roundToNearest(newX), roundToNearest(newY), imgWidth, imgHeight);
             break;
         }
     }
@@ -192,6 +198,7 @@ private:
 
     static void initWeightRange(std::vector<float> &weightPos, std::vector<float> &weightValue, unsigned rangeCount, float length)
     {
+        weightPos.clear();
         weightPos.reserve(rangeCount+1);
         float rangeWidth = length / rangeCount;
         float pos = 0;
@@ -263,7 +270,7 @@ int main(int argc, char *argv[])
     QString extToScan = parser.value(formatfilter);
     QStringList filters;
     if (extToScan.isEmpty()) {
-        filters = { "*.jpg", ".jpeg", "*.png", "*.webp"};
+        filters = { "*.jpg", "*.jpeg", "*.png", "*.webp"};
     } else {
         filters = extToScan.split(',', Qt::SkipEmptyParts);
         for (auto& f : filters) {

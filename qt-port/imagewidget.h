@@ -18,7 +18,7 @@ class ImageWidget : public QOpenGLWidget, protected QOpenGLFunctions
 public:
     explicit ImageWidget(QWidget* parent = nullptr, Qt::WindowFlags f = Qt::WindowFlags());
     virtual ~ImageWidget();
-    void loadImage(const QImage &img, int x, int y, int w, int h);
+    void loadImage(QImage img, int x, int y, int w, int h);
 
 signals:
     void ready(int w, int h);
@@ -39,7 +39,7 @@ private:
     std::unique_ptr<QOpenGLTexture> m_image;
     QRect m_imageRect;
     std::unique_ptr<QOpenGLFramebufferObject> m_bgFbo;
-    QOpenGLShaderProgram* m_shader;
+    QOpenGLShaderProgram* m_shader = nullptr;
     QTimer* m_animeTimer;
     QElapsedTimer m_animeElapsed;
     QOpenGLVertexArrayObject m_vao;
